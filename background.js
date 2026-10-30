@@ -312,14 +312,39 @@ async function queryGeminiDirectly(base64Image, apiKey, prompt = '') {
   throw lastError || new Error('Gemini request failed.');
 }
 
-// Manual-only GitHub updater. No startup checks, scheduled checks, or automatic installs.
+// GitHub updater: checks are requested by the updater page, not on every
+// service-worker startup. Concurrent requests share one GitHub check.
 importScripts("updater.js");
 
-async function checkForExtensionUpdate() {
-  const { githubFineGrainedToken } = await chrome.storage.local.get("githubFineGrainedToken");
-  const update = await AutoSolveUpdater.check(githubFineGrainedToken || "");
-  await chrome.storage.local.set({ autosolveUpdateStatus: update });
-  return update;
+let updateCheckPromise = null;
+
+function checkForExtensionUpdate() {
+  if (updateCheckPromise) return updateCheckPromise;
+
+  updateCheckPromise = (async () => {
+    const { githubFineGrainedToken } = await chrome.storage.local.get("githubFineGrainedToken");
+    let update;
+
+    try {
+      update = await AutoSolveUpdater.check(githubFineGrainedToken || "");
+    } catch (error) {
+      const { autosolveUpdateStatus = {} } = await chrome.storage.local.get("autosolveUpdateStatus");
+      update = {
+        ...autosolveUpdateStatus,
+        currentVersion: chrome.runtime.getManifest().version,
+        checkedAt: new Date().toISOString(),
+        githubUrl: "https://github.com/SK64HD/autosolve_ai",
+        error: error?.message || "GitHub update check failed."
+      };
+    }
+
+    await chrome.storage.local.set({ autosolveUpdateStatus: update });
+    return update;
+  })().finally(() => {
+    updateCheckPromise = null;
+  });
+
+  return updateCheckPromise;
 }
 
 async function applyExtensionUpdate() {
@@ -332,10 +357,15 @@ async function applyExtensionUpdate() {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.action === "CHECK_FOR_UPDATES") {
     checkForExtensionUpdate()
-      .then(updateStatus => sendResponse({ success: !updateStatus.error, updateStatus, error: updateStatus.error || null }))
+      .then(updateStatus => sendResponse({
+        success: !updateStatus.error,
+        updateStatus,
+        error: updateStatus.error || null
+      }))
       .catch(error => sendResponse({ success: false, error: error?.message || String(error) }));
     return true;
   }
+
   if (message?.action === "APPLY_EXTENSION_UPDATE") {
     applyExtensionUpdate()
       .then(sendResponse)
