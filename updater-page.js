@@ -3,7 +3,6 @@ const logEl = $("log");
 const linkButton = $("link");
 const checkButton = $("check");
 const applyButton = $("apply");
-const autoUpdateEl = $("autoUpdate");
 let busy = false;
 
 const log = message => { logEl.textContent += "\n" + message; };
@@ -32,13 +31,13 @@ async function render() {
   applyButton.disabled = !info.linked || !info.updateAvailable;
   if (info.error) {
     updateStatus.className = "msg error";
-    updateStatus.textContent = info.error;
+    updateStatus.textContent = info.error + (info.githubUrl ? " Open repository: " + info.githubUrl : "");
   } else if (info.updateAvailable) {
     updateStatus.className = "msg";
     updateStatus.textContent = "An update is available (" + short(info.remoteSha) + ").";
   } else {
     updateStatus.className = "msg good";
-    updateStatus.textContent = "Up to date." + (info.linked ? "" : " Link the folder to enable automatic updates.");
+    updateStatus.textContent = "Up to date.";
   }
   return info;
 }
@@ -80,8 +79,7 @@ linkButton.addEventListener("click", async () => {
     return;
   }
   setBusy(false);
-  await installUpdate();
-  if (!busy) await render();
+  await render();
 });
 checkButton.addEventListener("click", async () => {
   if (busy) return;
@@ -90,10 +88,7 @@ checkButton.addEventListener("click", async () => {
   if (info && !info.error) log(info.updateAvailable ? "Update available." : "Already up to date.");
 });
 applyButton.addEventListener("click", installUpdate);
-autoUpdateEl.addEventListener("change", () => chrome.storage.local.set({ autoUpdate: autoUpdateEl.checked }));
 (async () => {
-  const settings = await chrome.storage.local.get("autoUpdate");
-  autoUpdateEl.checked = settings.autoUpdate !== false;
   const info = await render();
   if (new URLSearchParams(location.search).get("apply") === "1" && info?.linked) {
     if (info.permission === "granted") installUpdate();
