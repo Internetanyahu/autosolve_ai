@@ -264,71 +264,31 @@ chrome.commands.onCommand.addListener(command => {
   });
 });
 
-// Direct Gemini Vision API Request Handler
+// Text-only Gemini fallback. No screenshot or image analysis path exists.
 async function queryGeminiDirectly(base64Image, apiKey, prompt = '') {
-  const cleanBase64 = base64Image.replace(/^data:image\/[a-zA-Z+]+;base64,/, '');
-
-  const systemInstruction = await getCustomPrompt();
-
-  const parts = [];
-  if (cleanBase64 && cleanBase64.length > 50) {
-    parts.push({
-      inlineData: {
-        mimeType: 'image/png',
-        data: cleanBase64,
-      },
-    });
-  }
-  parts.push({
-    text: prompt || 'Analyze the supplied image and identify the visible task, relevant text, choices, and interactive elements. Follow the configured system prompt. Do not assume a subject or invent missing information. Return valid JSON.',
-  });
-
-  const requestBody = {
-    contents: [
-      {
-        parts,
-      },
-    ],
-    systemInstruction: {
-      parts: [{ text: systemInstruction }],
-    },
-    generationConfig: {
-      responseMimeType: 'application/json',
-      temperature: 0.1,
-    },
+  const systemPrompt = await getCustomPrompt();
+  const body = {
+    contents: [{ parts: [{ text: String(prompt || '') }] }],
+    ...(systemPrompt ? { systemInstruction: { parts: [{ text: systemPrompt }] } } : {}),
+    generationConfig: { responseMimeType: 'application/json', temperature: 0.1 }
   };
-
-  // High-quota Gemini models with automatic fast fallback (excludes gemini-3.8-flash to avoid 20 req/day quota limit)
-  const models = ['gemini-3.5-flash-lite', 'gemini-flash-lite-latest', 'gemini-3.5-flash', 'gemini-flash-latest'];
-  let lastError = null;
-
-  for (const model of models) {
+  let lastError;
+  for (const model of ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-flash-latest']) {
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody),
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
       });
-
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.error?.message || `HTTP ${res.status}`);
+      if (!response.ok) {
+        const detail = await response.json().catch(() => ({}));
+        throw new Error(detail.error?.message || `HTTP ${response.status}`);
       }
-
-      const data = await res.json();
-      const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!rawText) throw new Error('Gemini returned an empty candidate response.');
-
-      const parsed = JSON.parse(rawText);
-      return normalizeAndExtractAnswers(parsed, prompt);
-    } catch (err) {
-      lastError = err;
-      console.warn(`[AutoSolve AI] Model ${model} failed, checking next model...`, err.message);
-    }
+      const data = await response.json();
+      const raw = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!raw) throw new Error('Gemini returned an empty response.');
+      return normalizeAndExtractAnswers(JSON.parse(raw), prompt);
+    } catch (error) { lastError = error; }
   }
-
-  throw lastError || new Error('All Gemini models failed to process screenshot.');
+  throw lastError || new Error('Gemini request failed.');
 }
 
 // In-place GitHub updater, using the same folder-linking mechanism as PPUSA.
