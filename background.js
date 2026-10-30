@@ -128,7 +128,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
  
-// Text Mode Q&A Handler. Text-only; no screenshot analysis or automated answer clicking.
+// Text Mode Q&A Handler.
  (Strictly passive: No screen interactions, no mouse clicks)
 async function handleTextSolve(req) {
   const { text, provider = 'gemini', apiKey, model, baseUrl } = req;
@@ -259,12 +259,21 @@ async function getCustomPrompt() {
 
 chrome.commands.onCommand.addListener(command => {
   if (command === 'auto_copy_solve') handleAutoCopyAndSolve();
-  if (command === 'manual_next') chrome.tabs.query({active:true,currentWindow:true}, tabs => {
-    if (tabs[0]?.id) chrome.tabs.sendMessage(tabs[0].id,{action:'TRIGGER_MANUAL_NEXT'}).catch(()=>{});
+  if (command === 'manual_next') chrome.tabs.query({active:true,currentWindow:true}, async tabs => {
+    const tabId=tabs[0]?.id;
+    if(!tabId)return;
+    try {
+      const results=await chrome.scripting.executeScript({target:{tabId,allFrames:true},func:()=>{
+        const selectors=['.FrameRight','.footernav.navnext a','a.navnext','#btnNext','#btnCheck','button[aria-label*="next" i]','a[aria-label*="next" i]'];
+        for(const selector of selectors){const el=document.querySelector(selector);if(!el)continue;const style=getComputedStyle(el);if(style.display==='none'||style.visibility==='hidden'||!el.getClientRects().length||el.disabled)continue;el.click();return true;}return false;
+      }});
+      const clicked=results.some(item=>item.result===true);
+      logEvent(clicked?'ACTION':'ERROR',clicked?'Manual Next shortcut activated the page Next button.':'No visible Next button was found.');
+    } catch(error){logEvent('ERROR','Manual Next failed: '+error.message);}
   });
 });
 
-// Text-only Gemini fallback. No screenshot or image analysis path exists.
+// Text-only Gemini fallback.
 async function queryGeminiDirectly(base64Image, apiKey, prompt = '') {
   const systemPrompt = await getCustomPrompt();
   const body = {
