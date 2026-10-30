@@ -40,9 +40,26 @@
   const setHandle = handle => idbRun("readwrite", store => store.put(handle, HANDLE_KEY));
   const clearHandle = () => idbRun("readwrite", store => store.delete(HANDLE_KEY));
 
+  // Read the GitHub token from the linked extension folder. This file is
+  // intentionally local-only and must never be committed to the repository.
+  async function readTokenFile(handle) {
+    if (!handle) return "";
+    try {
+      const file = await (await handle.getFileHandle("git-token.txt")).getFile();
+      return (await file.text()).replace(/^\\uFEFF/, "").trim();
+    } catch (error) {
+      if (error?.name === "NotFoundError" || error?.name === "TypeMismatchError") return "";
+      throw error;
+    }
+  }
+  async function resolveToken(token, handle) {
+    const fileToken = await readTokenFile(handle).catch(() => "");
+    return fileToken || String(token || "").trim();
+  }
+
   // ---- GitHub helpers -----------------------------------------------------------
   async function gh(path, token) {
-    if (!token) throw new Error("Save your GitHub token first.");
+    if (!token) throw new Error("No GitHub token found. Put your read-only token in git-token.txt in the linked extension folder, or save it in the updater settings.");
     const response = await fetch(API + path, {
       headers: {
         "Accept": "application/vnd.github+json",
@@ -168,13 +185,14 @@
   async function check(token) {
     const prior = await getUpdaterState();
     try {
-      const remoteSha = await remoteExtensionSha(token);
+      const handle = await getHandle().catch(() => null);
+      const activeToken = await resolveToken(token, handle);
+      const remoteSha = await remoteExtensionSha(activeToken);
       let appliedSha = prior.appliedSha;
       if (!appliedSha) {
         appliedSha = remoteSha;
         await chrome.storage.local.set({ updaterState: { ...prior, appliedSha } });
       }
-      const handle = await getHandle().catch(() => null);
       let permission = "none";
       if (handle) permission = await handle.queryPermission({ mode: "readwrite" }).catch(() => "prompt");
       return {
@@ -215,7 +233,8 @@
   }
   async function runApply(token, interactive) {
     const handle = await getHandle();
-    if (!handle) return { ok: false, needsLink: true, error: "The extension folder isn't linked yet." };
+    if (!handle) return { ok: false, needsLink: true, error: "The extension folder isn't linked yet. Link the folder containing git-token.txt." };
+    token = await resolveToken(token, handle);
     let permission = await handle.queryPermission({ mode: "readwrite" });
     if (permission !== "granted" && interactive) permission = await handle.requestPermission({ mode: "readwrite" });
     if (permission !== "granted") return { ok: false, needsPermission: true, error: "Folder access needs to be granted again." };
