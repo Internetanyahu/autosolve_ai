@@ -11,7 +11,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const customPromptInput = document.getElementById('customPrompt');
 
   const speedInput = document.getElementById('videoSpeed');
-  const waitInput = document.getElementById('videoWaitSeconds');
   const saveBtn = document.getElementById('save-btn');
   const testBtn = document.getElementById('test-btn');
   const statusMsg = document.getElementById('status-msg');
@@ -34,7 +33,6 @@ document.addEventListener('DOMContentLoaded', () => {
       customModel: '',
       customApiKey: '',
       videoSpeed: 16,
-      videoWaitSeconds: 15,
       customPrompt: '',
     },
     (data) => {
@@ -51,7 +49,6 @@ document.addEventListener('DOMContentLoaded', () => {
         else fetch(chrome.runtime.getURL('prompt.txt')).then(r => r.text()).then(t => { if (!customPromptInput.value) customPromptInput.value = t; }).catch(() => {});
       }
       speedInput.value = data.videoSpeed || 16;
-      waitInput.value = data.videoWaitSeconds || 15;
     }
   );
 
@@ -71,7 +68,6 @@ document.addEventListener('DOMContentLoaded', () => {
       customApiKey: customApiKeyInput.value.trim(),
       customPrompt: customPromptInput ? customPromptInput.value : '',
       videoSpeed: Math.min(16, Math.max(1, Number(speedInput.value) || 16)),
-      videoWaitSeconds: Math.max(3, Number(waitInput.value) || 15),
     };
 
     chrome.storage.sync.set(payload, () => {
