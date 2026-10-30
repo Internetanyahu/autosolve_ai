@@ -1,6 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
-  const defaultModeSelect = document.getElementById('defaultMode');
   const providerSelect = document.getElementById('selectedAiProvider');
+  const githubTokenInput = document.getElementById('githubFineGrainedToken');
   const geminiKeyInput = document.getElementById('geminiApiKey');
   const openaiKeyInput = document.getElementById('openaiApiKey');
   const claudeKeyInput = document.getElementById('claudeApiKey');
@@ -25,7 +25,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // Load saved preferences
   chrome.storage.sync.get(
     {
-      defaultMode: 'text',
       selectedAiProvider: 'gemini',
       geminiApiKey: '',
       openaiApiKey: '',
@@ -39,7 +38,6 @@ document.addEventListener('DOMContentLoaded', () => {
       customPrompt: '',
     },
     (data) => {
-      defaultModeSelect.value = data.defaultMode || 'text';
       if (providerSelect) providerSelect.value = data.selectedAiProvider || 'gemini';
       geminiKeyInput.value = data.geminiApiKey || '';
       openaiKeyInput.value = data.openaiApiKey || '';
@@ -57,9 +55,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   );
 
+  chrome.storage.local.get(['githubFineGrainedToken'], (data) => {
+    githubTokenInput.value = data.githubFineGrainedToken || '';
+  });
+
   saveBtn.onclick = () => {
     const payload = {
-      defaultMode: defaultModeSelect.value,
       selectedAiProvider: providerSelect ? providerSelect.value : 'gemini',
       geminiApiKey: geminiKeyInput.value.trim(),
       openaiApiKey: openaiKeyInput.value.trim(),
@@ -74,10 +75,12 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     chrome.storage.sync.set(payload, () => {
-      showStatus('All settings & AI provider keys saved successfully!');
+      chrome.storage.local.set({ githubFineGrainedToken: githubTokenInput.value.trim() }, () => {
+      showStatus('Settings, API keys, and GitHub token saved successfully.');
       setTimeout(() => {
         statusMsg.style.display = 'none';
       }, 3500);
+      });
     });
   };
 
