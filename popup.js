@@ -83,7 +83,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         .map((ans) => {
           const num = ans.number || 1;
           const letter = ans.letter ? `(${ans.letter}) ` : '';
-          return `<div class="big-answer-main">👉 [${num}] ${letter}"${ans.text}"</div>`;
+          const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+          })[char]);
+          const question = ans.question
+            ? `<div class="big-answer-sub">Question [${num}]: ${escapeHtml(ans.question)}</div>`
+            : '';
+          return `${question}<div class="big-answer-main">👉 [${num}] ${letter}"${escapeHtml(ans.text)}"</div>`;
         })
         .join('');
     } else {
