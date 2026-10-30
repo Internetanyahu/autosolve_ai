@@ -37,98 +37,21 @@ function logEvent(level, message, data = null) {
   });
 }
 
-function normalizeAndExtractAnswers(result, rawInputText = '') {
-  if (!result || typeof result !== 'object') {
-    result = {};
-  }
+function normalizeAndExtractAnswers(result) {
+  if (!result || typeof result !== 'object') result = {};
   if (!Array.isArray(result.answers)) result.answers = [];
   if (!Array.isArray(result.allChoices)) result.allChoices = [];
   if (!Array.isArray(result.dropdowns)) result.dropdowns = [];
-
-  // 1. If answers already present, guarantee number and letter
-  if (result.answers.length > 0) {
-    result.answers = result.answers.map((ans, idx) => ({
-      number: typeof ans.number === 'number' ? ans.number : idx + 1,
-      letter: ans.letter || String.fromCharCode(65 + idx),
-      text: String(ans.text || ''),
+  if (result.answers.length) {
+    result.answers = result.answers.map((answer, index) => ({
+      ...answer,
+      number: Number.isInteger(answer.number) && answer.number > 0 ? answer.number : index + 1,
+      letter: answer.letter || String.fromCharCode(65 + index),
+      text: String(answer.text || ''),
       isCorrect: true,
-      confidence: typeof ans.confidence === 'number' ? ans.confidence : 0.98,
+      confidence: typeof answer.confidence === 'number' ? answer.confidence : null,
     }));
-    return result;
   }
-
-  // 2. Check allChoices for isCorrect items
-  const correctInChoices = result.allChoices.filter((c) => c.isCorrect);
-  if (correctInChoices.length > 0) {
-    result.answers = correctInChoices.map((c, idx) => ({
-      number: typeof c.number === 'number' ? c.number : idx + 1,
-      letter: c.letter || String.fromCharCode(65 + idx),
-      text: String(c.text || ''),
-      isCorrect: true,
-      confidence: 0.98,
-    }));
-    return result;
-  }
-
-  // 3. Match against conciseReasoning
-  const reasoning = (result.conciseReasoning || '').toLowerCase();
-  for (const choice of result.allChoices) {
-    if (choice.text && reasoning.includes(choice.text.toLowerCase())) {
-      choice.isCorrect = true;
-      result.answers.push({
-        number: typeof choice.number === 'number' ? choice.number : 1,
-        letter: choice.letter || 'A',
-        text: choice.text,
-        isCorrect: true,
-        confidence: 0.96,
-      });
-      return result;
-    }
-  }
-
-  // 4. Incomplete prompt / Question stem extraction (e.g. Edgenuity Queen Elizabeth English 4)
-  const fullContext = `${rawInputText} ${result.question || ''} ${result.conciseReasoning || ''}`.toLowerCase();
-  let extractedAnswer = '';
-
-  if (fullContext.includes('tilbury') || fullContext.includes('parliament') || fullContext.includes('elizabeth')) {
-    if (fullContext.includes('audience and purpose') || fullContext.includes('differences in')) {
-      extractedAnswer = 'audience and purpose';
-    }
-  }
-
-  if (!extractedAnswer && result.conciseReasoning) {
-    const match = result.conciseReasoning.match(/(?:differences in|therefore|answer is|correct answer is|concludes)\s+["']?([^"'.\n,]+(?:\s+and\s+[^"'.\n,]+)?)["']?/i);
-    if (match && match[1]?.trim().length > 2) {
-      extractedAnswer = match[1].trim();
-    } else {
-      const firstSentence = result.conciseReasoning.split(/[.!?]/)[0] || '';
-      extractedAnswer = firstSentence.slice(0, 60).trim();
-    }
-  }
-
-  if (!extractedAnswer) {
-    extractedAnswer = 'audience and purpose';
-  }
-
-  result.answers = [
-    {
-      number: 1,
-      letter: 'A',
-      text: extractedAnswer,
-      isCorrect: true,
-      confidence: 0.99,
-    },
-  ];
-
-  if (result.allChoices.length === 0) {
-    result.allChoices = [
-      { number: 1, letter: 'A', text: extractedAnswer, isCorrect: true },
-      { number: 2, letter: 'B', text: 'setting and culture', isCorrect: false },
-      { number: 3, letter: 'C', text: 'length and style', isCorrect: false },
-      { number: 4, letter: 'D', text: 'tone and meter', isCorrect: false },
-    ];
-  }
-
   return result;
 }
 
@@ -356,6 +279,7 @@ async function handleTextSolve(req) {
         apiKey,
         model,
         baseUrl,
+        systemPrompt: await getCustomPrompt(),
       }),
     });
 
@@ -393,7 +317,7 @@ async function handleTextSolve(req) {
   if (provider === 'gemini') {
     const key = apiKey || await getGeminiApiKey();
     if (!key) throw new Error('Gemini API key is required. Please paste your key in the popup.');
-    const promptText = `Analyze this question and provide the numbered answers: \n\n${text || ''}`;
+    const promptText = `Analyze the supplied material and follow the configured output format.\n\n${text || ''}`;
     const rawResult = await queryGeminiDirectly(imageBase64 || '', key, promptText);
     const result = normalizeAndExtractAnswers(rawResult, text);
 
@@ -565,121 +489,27 @@ chrome.commands.onCommand.addListener((command) => {
   }
 });
 
+async function getCustomPrompt() {
+  try {
+    const stored = await new Promise(resolve => chrome.storage.sync.get(['customPrompt'], resolve));
+    if (typeof stored.customPrompt === 'string' && stored.customPrompt.trim()) return stored.customPrompt;
+  } catch (error) {
+    console.warn('[AutoSolve AI] Could not read saved prompt:', error);
+  }
+  try {
+    const response = await fetch(chrome.runtime.getURL('prompt.txt'));
+    if (response.ok) return await response.text();
+  } catch (error) {
+    console.warn('[AutoSolve AI] Could not load prompt.txt:', error);
+  }
+  return 'You are a general-purpose assistant. Use only supplied text and images. Do not assume a subject or invent missing answers. Return valid JSON.';
+}
+
 // Direct Gemini Vision API Request Handler
 async function queryGeminiDirectly(base64Image, apiKey, prompt = '') {
   const cleanBase64 = base64Image.replace(/^data:image\/[a-zA-Z+]+;base64,/, '');
 
-  const systemInstruction = `You are an elite academic master and expert in English literature, specifically high school and AP English, specializing in Edgenuity English 4 A and English 4 B (British Literature, Romanticism, Victorian, Renaissance, Poetic Forms, Literary Analysis, Rhetoric, and Reading Comprehension).
-
-1. EXPERTISE IN ENGLISH 4 A & ENGLISH 4 B:
-   - You have encyclopedic mastery of British and World Literature across all eras:
-     * Anglo-Saxon & Medieval (Beowulf, Chaucer/Canterbury Tales, Arthurian legends)
-     * Renaissance & Shakespeare (Macbeth, Hamlet, Sonnets, metaphysical poets like Donne)
-     * Enlightenment, Restoration, & Satire (Swift, Pope)
-     * Romanticism (Keats, Wordsworth, Coleridge, Byron, Shelley, Blake)
-     * Victorian Era (Tennyson, the Brownings, Bronte sisters, Dickens)
-     * Modern & Postmodern Literature (Yeats, Eliot, Orwell, Woolf)
-   - LITERARY FORMS & DEFINITIONS:
-     * ODE: An exalted, formal lyric poem of serious reflection that pays homage to or addresses a person, object, or abstract concept (apostrophe, e.g. Keats's "Ode on a Grecian Urn" directly addressing the urn: "Thou, silent form...").
-       - Distinctive features:
-         (1) Written in a formal, elevated style with dignified diction and tone.
-         (2) Directly addresses an object, person, or abstraction (apostrophe).
-       - An ode does NOT tell a story (narrative poems and ballads tell stories; an ode is lyric and meditative).
-       - An ode does NOT incorporate jokes or humor.
-       - Generic poetic traits like using rhyme or stanzas are common to all traditional poetry and do NOT uniquely indicate that a poem is an ode.
-     * BALLAD: A narrative poem meant to be sung or recited, typically telling a dramatic or tragic folk story in quatrains.
-     * ELEGY: A solemn, reflective poem of mourning or lament for the dead.
-     * EPIC: A long narrative poem recounting the deeds of a legendary or heroic figure.
-     * SONNET: A 14-line poem with specific meter (iambic pentameter) and rhyme scheme.
-   - MULTI-SELECT INSTRUCTIONS:
-     * Always carefully check directives such as "Choose two correct answers", "Select two", "Choose all that apply", or "Select three".
-     * Ensure EXACTLY the requested number of correct choices are flagged with "isCorrect": true.
-     * Scrutinize every option individually. Never guess; prove each answer with evidence and literary definitions.
-
-2. CRITICAL COORDINATE INSTRUCTION - CLICK THE CENTER OF THE TEXTBOX:
-   - For every answer choice, coordinates MUST target the horizontal and vertical CENTER of the text box / choice container (the text block itself).
-   - In modern educational platforms (including Edgenuity, Canvas, Blackboard, Schoology), the ENTIRE text box and option container is clickable.
-   - DO NOT target the edge, corner, or the tiny checkbox/radio circle icon on the far left!
-   - Target the middle of the option's text block (typically xPercent is between 30% and 55% across the screen depending on layout, and yPercent is directly at the vertical center of that option row).
-   - Clicking the center of the text box is vastly more reliable, human-like, and robust.
-
-3. SPECIALIZED SUPPORT FOR DROP-DOWN MENU QUESTIONS:
-   - In Edgenuity English 4 A & B, multi-part questions often use drop-down menus (<select> elements or clickable select boxes) positioned underneath sub-questions or sentences.
-   - For drop-down questions:
-     * Set "questionType": "dropdown".
-     * Populate "dropdowns" array with an object for EACH drop-down menu:
-       - "prompt": The sub-question or context phrase above the dropdown (e.g. "What does the repetition of the phrase for ever suggest about the image on the vase?").
-       - "selectedAnswer": The academically correct choice/phrase to select from that drop-down menu.
-       - "coordinates": { "xPercent", "yPercent" } pointing directly to the CENTER of the drop-down box/button on screen.
-     * Also include corresponding entries in "options" with "isCorrect": true so both access formats are supported.
-   - SPECIFIC KEATS "ODE ON A GRECIAN URN" (STANZA 3) DROP-DOWN RULES:
-     * Question 1 ("What does the repetition of the phrase for ever suggest about the image on the vase?"):
-       - Correct answer: The image is permanent / frozen in time / immortal (art never dies or fades, unlike mortal humans). DO NOT pick "The image is hard to see."
-     * Question 2 ("What does the repetition of the word happy suggest?"):
-       - Correct answer: The speaker admires the couple's joy / celebrates eternal happiness.
-     * Question 3 ("Based on the poet's diction, what is the tone of the passage?"):
-       - Correct answer: admiring and joyful / celebratory / enthusiastic / reverent (NOT "angry and bitter").
-
-4. STRUCTURED DATA SPECIFICATION:
-{
-  "question": "string (the exact question text)",
-  "questionType": "single_choice" | "multiple_choice" | "dropdown" | "true_false" | "text" | "video_only",
-  "conciseReasoning": "string (deep, precise academic explanation)",
-  "hasVideo": boolean,
-  "options": [
-    {
-      "text": "string (text label of option)",
-      "isCorrect": boolean (true if correct answer),
-      "confidence": number (0.0 to 1.0),
-      "coordinates": {
-        "xPercent": number (0 to 100 percentage from left of screen to the horizontal CENTER of the choice text box),
-        "yPercent": number (0 to 100 percentage from top of screen to the vertical CENTER of the choice text box)
-      }
-    }
-  ],
-  "dropdowns": [
-    {
-      "prompt": "string (the question or label for this dropdown)",
-      "selectedAnswer": "string (the exact text to select in this dropdown)",
-      "coordinates": {
-        "xPercent": number (0 to 100 percentage to the center of the drop-down box),
-        "yPercent": number (0 to 100 percentage to the center of the drop-down box)
-      }
-    }
-  ],
-  "answers": [
-    {
-      "number": 1,
-      "letter": "A",
-      "text": "Exact text of the correct choice",
-      "isCorrect": true,
-      "confidence": 0.98
-    }
-  ],
-  "allChoices": [
-    {
-      "number": 1,
-      "letter": "A",
-      "text": "Option 1",
-      "isCorrect": true
-    }
-  ],
-  "nextButton": {
-    "detected": boolean,
-    "coordinates": {
-      "xPercent": number (0 to 100 percentage from left of screen),
-      "yPercent": number (0 to 100 percentage from top of screen)
-    }
-  }
-}
-
-5. INCOMPLETE PROMPTS & QUESTIONS WITHOUT EXPLICIT OPTIONS:
-   When user pastes an incomplete question stem without options (e.g. 'Queen Elizabeth most likely used different rhetorical appeals in her Address to the Troops at Tilbury and her Response to Parliament\\'s Request That She Marry due to differences in'):
-   - You MUST reconstruct or identify the canonical standard answer choice(s).
-   - For Queen Elizabeth Tilbury/Parliament, the answer is 'audience and purpose'.
-   - The answers/options array MUST NEVER BE EMPTY under any circumstances!
-   - Populate options and answers with at least one numbered answer ([1], Letter 'A', 'audience and purpose', isCorrect: true).
-`;
+  const systemInstruction = await getCustomPrompt();
 
   const parts = [];
   if (cleanBase64 && cleanBase64.length > 50) {
