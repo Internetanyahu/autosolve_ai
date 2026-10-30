@@ -8,16 +8,21 @@ Every commit pushed to `main` triggers GitHub Actions to build a versioned exten
 
 When an update is available, open the extension popup and choose **Download update**. The ZIP is saved through Chrome's download manager.
 
-### Apply an update on Chromebook / Chrome
+### First-time setup of the updater
 
-An unpacked extension cannot replace its own installed files or silently reload itself. After downloading:
+The updater is included in the release ZIP. If you are using an older copy of the extension, download the current release once and install it manually:
 
-1. Open the downloaded ZIP in the ChromeOS Files app and extract it.
-2. Keep the extracted extension folder in a permanent location (do not delete it after loading).
-3. Open `chrome://extensions`.
-4. Find AutoSolve AI and click **Reload** if you replaced the files in the same folder. If you extracted to a new folder, remove the old unpacked entry and choose **Load unpacked**, then select the new extracted folder.
-5. The extension should now show the version from the downloaded release.
+1. Download the ZIP from [GitHub Releases](https://github.com/SK64HD/autosolve_ai/releases/latest).
+2. Extract it in the ChromeOS Files app.
+3. Open `chrome://extensions`, enable Developer mode, and use **Load unpacked** to select the extracted extension folder.
 
-Your saved API keys and settings are stored by Chrome and are not included in the update ZIP.
+### Applying later updates
 
-The updater downloads code only from this repository's GitHub Releases. It does not install or activate updates automatically.
+1. Download the update from the extension popup.
+2. Extract the ZIP to a temporary folder.
+3. Copy the extracted files into the **same folder** you originally loaded as an unpacked extension, replacing the older files.
+4. Open `chrome://extensions` and click **Reload** on AutoSolve AI.
+
+Keep the original extension folder path unchanged. Chrome ties unpacked-extension storage to its identity, and changing the folder can cause saved API keys and preferences to appear missing. The ZIP does not contain your API keys or settings.
+
+An unpacked extension cannot replace its own installed files or silently reload itself. The updater automates release detection and downloading; the final file replacement and reload remain manual.
