@@ -246,40 +246,23 @@ async function handleAutoCopyAndSolve() {
 }
 
 async function getCustomPrompt() {
-  let basePrompt = '';
   try {
-    const stored = await new Promise(resolve => chrome.storage.sync.get(['customPrompt'], resolve));
-    if (typeof stored.customPrompt === 'string' && stored.customPrompt.trim()) {
-      basePrompt = stored.customPrompt;
-    }
-  } catch (error) {
-    console.warn('[AutoSolve AI] Could not read saved prompt:', error);
-  }
-
-  if (!basePrompt) {
-    try {
-      const response = await fetch(chrome.runtime.getURL('prompt.txt'));
-      if (response.ok) basePrompt = await response.text();
-    } catch (error) {
-      console.warn('[AutoSolve AI] Could not load prompt.txt:', error);
-    }
-  }
-
-// This requirement is deliberately appended even when the user has a saved custom prompt.
-  return `${basePrompt.trim()}
-
-MANDATORY MULTI-QUESTION PAGE RULE:
-- Inspect the ENTIRE supplied page text/image from beginning to end before answering. Never stop after finding the first question.
-- Identify every distinct question and question subpart that requires its own answer, in the exact order it appears on the page (top to bottom, then left to right for columns).
-- Return one answer entry for every identified question/subpart. Do not omit later questions because they are repetitive, on another section, or below the fold in supplied content.
-- Put the original question wording in each answer object's "question" field. Put its answer in "text". Set "number" to its sequential position (1, 2, 3, ...) in page order.
-- If a question has multiple required selections, keep those selections together in that question's answer entry unless the page clearly presents them as separate numbered subquestions.
-- If a question cannot be answered from the supplied material, still include its entry and explain what is missing rather than silently skipping it or guessing.
-- Keep "answers" in page order. Do not reorder by topic, confidence, or question type.
-- Before returning JSON, verify that the number of answer entries matches the number of distinct questions/subparts detected. If any are missing, complete them.
-`;
+    const saved = await chrome.storage.sync.get(['customPrompt']);
+    if (typeof saved.customPrompt === 'string' && saved.customPrompt.trim()) return saved.customPrompt.trim();
+  } catch (error) { console.warn('[AutoSolve AI] Could not read saved prompt:', error); }
+  try {
+    const response = await fetch(chrome.runtime.getURL('prompt.txt'));
+    if (response.ok) return (await response.text()).trim();
+  } catch (error) { console.warn('[AutoSolve AI] Could not load prompt.txt:', error); }
+  return '';
 }
-*/
+
+chrome.commands.onCommand.addListener(command => {
+  if (command === 'auto_copy_solve') handleAutoCopyAndSolve();
+  if (command === 'manual_next') chrome.tabs.query({active:true,currentWindow:true}, tabs => {
+    if (tabs[0]?.id) chrome.tabs.sendMessage(tabs[0].id,{action:'TRIGGER_MANUAL_NEXT'}).catch(()=>{});
+  });
+});
 
 // Direct Gemini Vision API Request Handler
 async function queryGeminiDirectly(base64Image, apiKey, prompt = '') {
