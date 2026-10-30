@@ -1,10 +1,4 @@
 document.addEventListener('DOMContentLoaded', async () => {
-  // Mode Tabs
-  const modeTabText = document.getElementById('mode-tab-text');
-  const modeTabVision = document.getElementById('mode-tab-vision');
-  const sectionTextMode = document.getElementById('section-text-mode');
-  const sectionVisionMode = document.getElementById('section-vision-mode');
-
   // Provider & Key controls
   const selectAiProvider = document.getElementById('select-ai-provider');
   const inputApiKey = document.getElementById('input-api-key');
@@ -17,20 +11,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   const btnSolveText = document.getElementById('btn-solve-text');
   const btnPasteClipboard = document.getElementById('btn-paste-clipboard');
   const btnClearText = document.getElementById('btn-clear-text');
-
-  // Vision Mode controls
-  const btnScan = document.getElementById('btn-scan');
-  const btnAutopilot = document.getElementById('btn-autopilot');
-  const btnVideo = document.getElementById('btn-video');
-  const btnManualNext = document.getElementById('btn-manual-next');
-
   // Common controls
   const consoleBox = document.getElementById('console-box');
   const btnClear = document.getElementById('btn-clear');
   const btnOptions = document.getElementById('btn-options');
-
-  let currentMode = 'text'; // 'text' | 'vision'
-  let isAutoPilotActive = false;
 
   const keyStorageMap = {
     gemini: 'geminiApiKey',
@@ -174,38 +158,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     return result;
   }
-
-  // 1. Mode Switching Logic
-  function switchMode(mode) {
-    currentMode = mode;
-    if (mode === 'text') {
-      modeTabText.classList.add('active');
-      modeTabVision.classList.remove('active');
-      sectionTextMode.style.display = 'block';
-      sectionVisionMode.style.display = 'none';
-      chrome.storage.sync.set({ defaultMode: 'text' });
-    } else {
-      modeTabVision.classList.add('active');
-      modeTabText.classList.remove('active');
-      sectionVisionMode.style.display = 'block';
-      sectionTextMode.style.display = 'none';
-      chrome.storage.sync.set({ defaultMode: 'vision' });
-    }
-  }
-
-  modeTabText.onclick = () => switchMode('text');
-  modeTabVision.onclick = () => switchMode('vision');
-
-  // Load saved default mode
-  chrome.storage.sync.get(['defaultMode'], (res) => {
-    if (res.defaultMode === 'vision') {
-      switchMode('vision');
-    } else {
-      switchMode('text');
-    }
-  });
-
-  // 2. Multi-AI Key Management & Live Online Verification
+  // Multi-AI Key Management & Live Online Verification
   async function testAndVerifyKey(provider, key) {
     if (!key || key.trim().length < 5) {
       statusBadge.innerHTML = `<span style="color:#ef4444;">● Paste ${provider.toUpperCase()} Key</span>`;
@@ -698,101 +651,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   };
 
-  // 5. Vision Mode Handlers (Screen Clicker)
-  btnScan.onclick = () => {
-    appendLog('ACTION', 'Initiating screen capture & Vision analysis...');
-    btnScan.disabled = true;
-    btnScan.textContent = 'Analyzing screen...';
-
-    chrome.runtime.sendMessage(
-      {
-        action: 'TRIGGER_SCAN',
-        options: { autoClickNext: true },
-      },
-      (response) => {
-        btnScan.disabled = false;
-        btnScan.textContent = 'Scan & Solve Active Tab';
-        if (response && response.success) {
-          const an = response.analysis;
-          let correctOpts = [];
-          if (an && Array.isArray(an.options)) {
-            correctOpts = an.options.filter((o) => o.isCorrect);
-            if (correctOpts.length > 0) {
-              correctOpts.forEach((o, i) => {
-                const optNum = o.number || (an.options.indexOf(o) + 1);
-                const optLetter = o.letter || String.fromCharCode(64 + optNum);
-                appendLog('CLICK', `👉 SCREENSHOT ANSWER [${optNum}] (${optLetter}): "${o.text}"`);
-              });
-            }
-          }
-          if (an && Array.isArray(an.dropdowns)) {
-            an.dropdowns.forEach((dd, dIdx) => {
-              appendLog(
-                'CLICK',
-                `👉 DROPDOWN [${dd.menuNumber || dIdx + 1}]: Pick Option [${dd.selectedNumber || '✓'}] "${dd.selectedAnswer}"`
-              );
-            });
-          }
-          appendLog('COMPLETE', 'Auto-solve completed successfully.');
-
-          // BIG GLOWING GREEN ANSWER BANNER AT THE END
-          renderBigGreenAnswer(correctOpts, an.dropdowns || []);
-        } else if (response && response.error) {
-          appendLog('ERROR', `Error: ${response.error}`);
-        }
-      }
-    );
-  };
-
-  function updateAutopilotButton(running) {
-    if (running) {
-      btnAutopilot.textContent = 'Stop Auto-Pilot';
-      btnAutopilot.classList.add('running');
-    } else {
-      btnAutopilot.textContent = 'Start Auto-Pilot';
-      btnAutopilot.classList.remove('running');
-    }
-  }
-
-  btnAutopilot.onclick = () => {
-    if (isAutoPilotActive) {
-      chrome.runtime.sendMessage({ action: 'STOP_AUTOPILOT' }, () => {
-        isAutoPilotActive = false;
-        updateAutopilotButton(false);
-        appendLog('ACTION', 'Auto-Pilot deactivated.');
-      });
-    } else {
-      chrome.runtime.sendMessage({ action: 'START_AUTOPILOT' }, () => {
-        isAutoPilotActive = true;
-        updateAutopilotButton(true);
-        appendLog('ACTION', 'Auto-Pilot activated! Loop running.');
-      });
-    }
-  };
-
-  btnVideo.onclick = () => {
-    appendLog('VIDEO', 'Accelerating videos in active tab to 16x...');
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (tabs[0]?.id) {
-        chrome.tabs.sendMessage(tabs[0].id, { action: 'BOOST_VIDEO_16X' }, (res) => {
-          if (res?.success) appendLog('VIDEO', 'Videos accelerated to 16x.');
-        });
-      }
-    });
-  };
-
-  if (btnManualNext) {
-    btnManualNext.onclick = () => {
-      appendLog('ACTION', 'Advancing to next activity (.FrameRight)...');
-      chrome.runtime.sendMessage({ action: 'TRIGGER_MANUAL_NEXT' }, (res) => {
-        if (res && res.success) {
-          appendLog('CLICK', 'Next / Submit clicked successfully across all frames!');
-        } else {
-          appendLog('ACTION', 'Attempted Next button click across all frames.');
-        }
-      });
-    };
-  }
 
   btnClear.onclick = () => {
     consoleBox.innerHTML = '';
@@ -811,11 +669,5 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (req.action === 'NEW_LOG' && req.log) {
       appendLog(req.log.level, req.log.message, false);
     }
-  });
-
-  // Query background status
-  chrome.runtime.sendMessage({ action: 'GET_STATUS' }, (res) => {
-    isAutoPilotActive = !!res?.isAutoPilotRunning;
-    updateAutopilotButton(isAutoPilotActive);
   });
 });
