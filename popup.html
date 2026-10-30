@@ -372,6 +372,20 @@
     <a id="btn-options">Full Settings</a>
   </div>
 
+  <!-- Backward-compatible controls used by popup.js; API keys are managed in Full Settings. -->
+  <div id="legacy-key-controls" hidden aria-hidden="true">
+    <select id="select-ai-provider">
+      <option value="gemini">Google Gemini</option>
+      <option value="openai">OpenAI</option>
+      <option value="anthropic">Anthropic Claude</option>
+      <option value="deepseek">DeepSeek</option>
+      <option value="custom">Custom</option>
+    </select>
+    <input id="input-api-key" type="password" autocomplete="off">
+    <button id="btn-toggle-key" type="button">Show</button>
+    <button id="btn-save-key" type="button">Save Key</button>
+  </div>
+
   <script src="popup.js"></script>
   <script src="popup-updater.js"></script>
 </body>
