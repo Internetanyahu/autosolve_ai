@@ -1,55 +1,223 @@
-// AutoSolve AI update status and download controls.
-document.addEventListener('DOMContentLoaded', () => {
-  const status = document.getElementById('update-status');
-  const downloadButton = document.getElementById('update-download');
-  const releaseLink = document.getElementById('update-release-link');
-  if (!status || !downloadButton) return;
+// In-place updater for the unpacked extension.
+//
+// Chrome never auto-updates an unpacked extension, so this script does it
+// directly: it compares the extension/ folder on GitHub's main branch with the
+// folder you loaded unpacked, downloads only the files that differ, writes them
+// into that folder (via the File System Access API), and reloads the extension.
+//
+// Shared by background.js (importScripts) and updater.html (script tag).
+(() => {
+  if (self.AutoSolveUpdater) return;
 
-  async function checkForUpdates() {
-    status.textContent = 'Checking GitHub for updates...';
-    downloadButton.disabled = true;
-    downloadButton.style.opacity = '0.55';
+  const REPO = "SK64HD/autosolve_ai";
+  const BRANCH = "main";
+  const EXPECTED_NAME = "AutoSolve AI - Text Q&A";
+  const API = "https://api.github.com/repos/" + REPO;
+  const HANDLE_KEY = "extensionDir";
+
+  // ---- IndexedDB storage for the folder handle -------------------------------
+  function openDb() {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open("autosolve-ai-updater", 1);
+      request.onupgradeneeded = () => request.result.createObjectStore("handles");
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+  async function idbRun(mode, action) {
+    const db = await openDb();
     try {
-      const result = await chrome.runtime.sendMessage({ action: 'CHECK_FOR_UPDATES' });
-      if (!result || !result.success) throw new Error(result?.error || 'Update check failed');
-      if (result.updateAvailable) {
-        status.textContent = `Update available: v${result.latestVersion} (installed: v${result.currentVersion})`;
-        downloadButton.disabled = false;
-        downloadButton.style.opacity = '1';
-        releaseLink.href = result.releaseUrl;
-        releaseLink.style.display = 'inline';
-        downloadButton.dataset.downloadUrl = result.downloadUrl;
-        downloadButton.dataset.filename = `AutoSolveAI-v${result.latestVersion}.zip`;
-      } else {
-        status.textContent = `AutoSolve AI is up to date (v${result.currentVersion}).`;
-        releaseLink.style.display = 'none';
-      }
-    } catch (error) {
-      status.textContent = `Update check unavailable: ${error.message}`;
-    }
+      return await new Promise((resolve, reject) => {
+        const tx = db.transaction("handles", mode);
+        const request = action(tx.objectStore("handles"));
+        tx.oncomplete = () => resolve(request?.result ?? null);
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error);
+      });
+    } finally { db.close(); }
+  }
+  const getHandle = () => idbRun("readonly", store => store.get(HANDLE_KEY));
+  const setHandle = handle => idbRun("readwrite", store => store.put(handle, HANDLE_KEY));
+  const clearHandle = () => idbRun("readwrite", store => store.delete(HANDLE_KEY));
+
+  // ---- GitHub helpers -----------------------------------------------------------
+  async function gh(path, token) {
+    if (!token) throw new Error("Save your GitHub token first.");
+    const response = await fetch(API + path, {
+      headers: {
+        "Accept": "application/vnd.github+json",
+        "Authorization": "Bearer " + token,
+        "X-GitHub-Api-Version": "2022-11-28"
+      },
+      cache: "no-store"
+    });
+    if (response.status === 401 || response.status === 403) throw new Error("GitHub rejected the saved token (" + response.status + ").");
+    if (response.status === 404) throw new Error("Repository or branch not found (404). Check that the token can read " + REPO + ".");
+    if (!response.ok) throw new Error("GitHub request failed (" + response.status + ").");
+    return response.json();
+  }
+  async function remoteExtensionSha(token) {
+    const root = await gh("/git/trees/" + BRANCH, token);
+    if (!root.sha) throw new Error("No repository tree found on " + BRANCH + ".");
+    return root.sha;
+  }
+  async function remoteFiles(token, extensionSha) {
+    const listing = await gh("/git/trees/" + extensionSha + "?recursive=1", token);
+    if (listing.truncated) throw new Error("GitHub returned a truncated file list; refusing to update.");
+    return (listing.tree || []).filter(item => item.type === "blob" && item.path !== "README.md" && !item.path.startsWith(".github/")).map(item => ({ path: item.path, sha: item.sha }));
+  }
+  async function downloadBlob(token, sha) {
+    const blob = await gh("/git/blobs/" + sha, token);
+    if (blob.encoding !== "base64") throw new Error("Unexpected blob encoding from GitHub.");
+    const binary = atob(String(blob.content).replace(/\s/g, ""));
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
   }
 
-  downloadButton.addEventListener('click', async () => {
-    const url = downloadButton.dataset.downloadUrl;
-    if (!url) return;
-    downloadButton.disabled = true;
-    downloadButton.textContent = 'Starting...';
-    status.textContent = 'Preparing update download...';
+  // ---- Local file helpers -----------------------------------------------------------
+  // Git identifies a file by SHA-1("blob <length>\0" + bytes), so local files can
+  // be compared with GitHub's tree without downloading them.
+  async function gitBlobSha(bytes) {
+    const header = new TextEncoder().encode("blob " + bytes.length + "\0");
+    const all = new Uint8Array(header.length + bytes.length);
+    all.set(header);
+    all.set(bytes, header.length);
+    const digest = await crypto.subtle.digest("SHA-1", all);
+    return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("");
+  }
+  async function readLocal(root, relativePath) {
+    const parts = relativePath.split("/");
+    const name = parts.pop();
     try {
-      const result = await chrome.runtime.sendMessage({
-        action: 'DOWNLOAD_EXTENSION_UPDATE',
-        url,
-        filename: downloadButton.dataset.filename || 'AutoSolveAI-update.zip',
-      });
-      if (!result?.success) throw new Error(result?.error || 'Download could not be started');
-      status.textContent = 'Download started. Extract the ZIP and replace the files in your existing extension folder, then click Reload at chrome://extensions. Keep the same folder path to preserve saved settings.';
-      downloadButton.textContent = 'Download started';
+      let dir = root;
+      for (const part of parts) dir = await dir.getDirectoryHandle(part);
+      const file = await (await dir.getFileHandle(name)).getFile();
+      return new Uint8Array(await file.arrayBuffer());
     } catch (error) {
-      status.textContent = `Download failed: ${error.message}`;
-      downloadButton.disabled = false;
-      downloadButton.textContent = 'Download update';
+      if (error?.name === "NotFoundError" || error?.name === "TypeMismatchError") return null;
+      throw error;
     }
-  });
+  }
+  async function writeLocal(root, relativePath, bytes) {
+    const parts = relativePath.split("/");
+    const name = parts.pop();
+    let dir = root;
+    for (const part of parts) dir = await dir.getDirectoryHandle(part, { create: true });
+    const writable = await (await dir.getFileHandle(name, { create: true })).createWritable();
+    await writable.write(bytes);
+    await writable.close();
+  }
 
-  checkForUpdates();
-});
+  // ---- Folder linking (needs a visible page + user click) -------------------------
+  async function findExtensionRoot(picked) {
+    const candidates = [picked];
+    try { candidates.push(await picked.getDirectoryHandle("autosolve_ai")); } catch { /* not the extension root */ }
+    for (const candidate of candidates) {
+      try {
+        const file = await (await candidate.getFileHandle("manifest.json")).getFile();
+        if (JSON.parse(await file.text()).name === EXPECTED_NAME) return candidate;
+      } catch { /* try next */ }
+    }
+    throw new Error("That doesn't look like the PPUSA extension folder. Choose the same folder you used for \"Load unpacked\" (the one containing manifest.json).");
+  }
+  async function linkFolder() {
+    if (!self.showDirectoryPicker) throw new Error("This browser can't open a folder picker.");
+    const picked = await self.showDirectoryPicker({ id: "autosolve-ai-extension", mode: "readwrite" });
+    const root = await findExtensionRoot(picked);
+    await setHandle(root);
+    return root.name;
+  }
+
+  // ---- Public API ---------------------------------------------------------------------------
+  async function getUpdaterState() {
+    return (await chrome.storage.local.get("updaterState")).updaterState || {};
+  }
+
+  // Cheap check (one GitHub request). Never touches local files.
+  async function check(token) {
+    const prior = await getUpdaterState();
+    const remoteSha = await remoteExtensionSha(token);
+    let appliedSha = prior.appliedSha;
+    if (!appliedSha) {
+      // First run after a manual install: assume this copy matches main right now.
+      appliedSha = remoteSha;
+      await chrome.storage.local.set({ updaterState: { ...prior, appliedSha } });
+    }
+    const handle = await getHandle().catch(() => null);
+    let permission = "none";
+    if (handle) permission = await handle.queryPermission({ mode: "readwrite" }).catch(() => "prompt");
+    return {
+      currentVersion: chrome.runtime.getManifest().version,
+      remoteSha,
+      appliedSha,
+      updateAvailable: remoteSha !== appliedSha,
+      linked: Boolean(handle),
+      permission,
+      lastApplied: prior.lastApplied || null,
+      checkedAt: new Date().toISOString(),
+      error: null
+    };
+  }
+
+  // Downloads changed files and writes them into the linked folder.
+  // The caller reloads the extension when result.reload is true.
+  async function apply(token, { interactive = false } = {}) {
+    if (!navigator.locks) return runApply(token, interactive);
+    return navigator.locks.request("autosolve-ai-extension-update", { ifAvailable: true }, async lock => {
+      if (!lock) return { ok: false, busy: true, error: "Another update is already running." };
+      return runApply(token, interactive);
+    });
+  }
+  async function runApply(token, interactive) {
+    const handle = await getHandle();
+    if (!handle) return { ok: false, needsLink: true, error: "The extension folder isn't linked yet." };
+    let permission = await handle.queryPermission({ mode: "readwrite" });
+    if (permission !== "granted" && interactive) permission = await handle.requestPermission({ mode: "readwrite" });
+    if (permission !== "granted") return { ok: false, needsPermission: true, error: "Folder access needs to be granted again." };
+
+    const remoteSha = await remoteExtensionSha(token);
+    const files = await remoteFiles(token, remoteSha);
+    if (!files.some(file => file.path === "manifest.json")) throw new Error("The remote extension folder has no manifest.json; refusing to update.");
+
+    const changed = [];
+    for (const file of files) {
+      const local = await readLocal(handle, file.path);
+      if (!local || await gitBlobSha(local) !== file.sha) changed.push(file);
+    }
+    // manifest.json goes last so a failure never leaves it pointing at missing files.
+    changed.sort((a, b) => (a.path === "manifest.json") - (b.path === "manifest.json"));
+
+    // Download and verify everything before writing anything.
+    const downloaded = [];
+    for (const file of changed) {
+      const bytes = await downloadBlob(token, file.sha);
+      if (await gitBlobSha(bytes) !== file.sha) throw new Error("Download of " + file.path + " failed its integrity check.");
+      downloaded.push({ file, bytes });
+    }
+    const manifest = downloaded.find(item => item.file.path === "manifest.json");
+    if (manifest) {
+      const parsed = JSON.parse(new TextDecoder().decode(manifest.bytes));
+      if (parsed.manifest_version !== 3 || parsed.name !== EXPECTED_NAME) throw new Error("The new manifest.json doesn't look right; refusing to install it.");
+    }
+
+    for (const { file, bytes } of downloaded) {
+      await writeLocal(handle, file.path, bytes);
+      const written = await readLocal(handle, file.path);
+      if (!written || await gitBlobSha(written) !== file.sha) throw new Error("Could not verify " + file.path + " after writing it.");
+    }
+
+    const prior = await getUpdaterState();
+    await chrome.storage.local.set({
+      updaterState: {
+        ...prior,
+        appliedSha: remoteSha,
+        lastApplied: new Date().toISOString(),
+        lastAppliedFiles: changed.map(file => file.path)
+      }
+    });
+    return { ok: true, changed: changed.map(file => file.path), reload: changed.length > 0 };
+  }
+
+  self.AutoSolveUpdater = { check, apply, linkFolder, getHandle, clearHandle };
+})();
