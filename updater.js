@@ -42,22 +42,40 @@
 
   // ---- GitHub helpers -----------------------------------------------------------
   async function gh(path, token) {
-    if (!token) throw new Error("No GitHub token saved. Add a fine-grained GitHub token in the updater settings.");
-    const response = await fetch(API + path, {
-      headers: {
-        "Accept": "application/vnd.github+json",
-        "Authorization": "Bearer " + token,
-        "X-GitHub-Api-Version": "2022-11-28"
-      },
+    const headers = {
+      "Accept": "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28"
+    };
+    if (token) headers.Authorization = "Bearer " + String(token).trim();
+
+    let response = await fetch(API + path, {
+      headers,
       cache: "no-store"
     });
-    if (response.status === 401 || response.status === 403) {
-      throw new Error("GitHub rejected the saved token (" + response.status + ").");
+
+    // This repository is public. If a saved token is invalid, retry without
+    // authentication instead of letting a bad optional token block updates.
+    if (response.status === 401 && token) {
+      response = await fetch(API + path, {
+        headers: {
+          "Accept": "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28"
+        },
+        cache: "no-store"
+      });
     }
-    if (response.status === 404) {
-      throw new Error("Repository or branch not found (404). Check that the token can read " + REPO + ".");
+
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      const reason = detail.message ? ": " + detail.message : "";
+      if (response.status === 401 || response.status === 403) {
+        throw new Error("GitHub API access failed (" + response.status + ")" + reason);
+      }
+      if (response.status === 404) {
+        throw new Error("Repository or branch not found (404). Check that " + REPO + " is public and the branch exists.");
+      }
+      throw new Error("GitHub request failed (" + response.status + ")" + reason);
     }
-    if (!response.ok) throw new Error("GitHub request failed (" + response.status + ").");
     return response.json();
   }
   async function remoteExtensionSha(token) {
