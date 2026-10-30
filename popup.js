@@ -6,6 +6,21 @@ document.addEventListener('DOMContentLoaded', async () => {
   const btnSaveKey = document.getElementById('btn-save-key');
   const statusBadge = document.getElementById('api-status');
 
+  // Open the persistent native Chrome side panel. No pop-out window is created.
+  const btnSidepanel = document.getElementById('btn-sidepanel');
+  if (btnSidepanel) {
+    btnSidepanel.addEventListener('click', async () => {
+      try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!tab?.windowId) throw new Error('No active browser window found.');
+        await chrome.sidePanel.open({ windowId: tab.windowId });
+        appendLog('INFO', 'AutoSolve AI opened in the Chrome side panel.');
+      } catch (error) {
+        appendLog('ERROR', 'Could not open Chrome side panel: ' + error.message);
+      }
+    });
+  }
+
   // Text Mode controls
   const textQuestionInput = document.getElementById('text-question-input');
   const btnSolveText = document.getElementById('btn-solve-text');
