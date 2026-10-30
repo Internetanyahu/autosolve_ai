@@ -725,108 +725,70 @@ async function handleCaptureAndSolve(options = {}) {
   }
 }
 
-// GitHub release updater. Unpacked extensions cannot replace their own installed files,
-// so this checks releases and downloads a ZIP for the user to extract and reload.
-const AUTOSOLVE_RELEASES_API = 'https://api.github.com/repos/SK64HD/autosolve_ai/releases/latest';
-const AUTOSOLVE_UPDATE_ALARM = 'autosolve-ai-update-check';
-
-function compareExtensionVersions(left, right) {
-  const parse = (value) => String(value || '').replace(/^v/i, '').split(/[.+-]/).slice(0, 4).map(part => {
-    const match = part.match(/^\d+/);
-    return match ? Number(match[0]) : 0;
-  });
-  const a = parse(left);
-  const b = parse(right);
-  for (let i = 0; i < 4; i++) {
-    if ((a[i] || 0) > (b[i] || 0)) return 1;
-    if ((a[i] || 0) < (b[i] || 0)) return -1;
-  }
-  return 0;
-}
+// In-place GitHub updater, using the same folder-linking mechanism as PPUSA.
+importScripts("updater.js");
+const AUTOSOLVE_UPDATE_ALARM = "autosolve-ai-update-check";
 
 async function checkForExtensionUpdate() {
-  const currentVersion = chrome.runtime.getManifest().version;
-  const stored = await chrome.storage.local.get(['githubFineGrainedToken']);
-  const headers = { Accept: 'application/vnd.github+json' };
-  if (stored.githubFineGrainedToken) {
-    headers.Authorization = `Bearer ${stored.githubFineGrainedToken}`;
+  const { githubFineGrainedToken, autoUpdate = true } = await chrome.storage.local.get(["githubFineGrainedToken", "autoUpdate"]);
+  let update;
+  try {
+    update = await AutoSolveUpdater.check(githubFineGrainedToken || "");
+  } catch (error) {
+    const { autosolveUpdateStatus = {} } = await chrome.storage.local.get("autosolveUpdateStatus");
+    update = {
+      ...autosolveUpdateStatus,
+      currentVersion: chrome.runtime.getManifest().version,
+      checkedAt: new Date().toISOString(),
+      error: error?.message || "Update check failed"
+    };
+    await chrome.storage.local.set({ autosolveUpdateStatus: update });
+    return update;
   }
-  const response = await fetch(AUTOSOLVE_RELEASES_API, {
-    headers,
-    cache: 'no-store',
-  });
-  if (!response.ok) {
-    throw new Error(response.status === 404
-      ? 'No published extension release exists yet.'
-      : `GitHub returned HTTP ${response.status}.`);
-  }
+  update.autoUpdate = autoUpdate !== false;
+  await chrome.storage.local.set({ autosolveUpdateStatus: update });
+  chrome.runtime.sendMessage({ action: "UPDATE_STATUS_CHANGED" }).catch(() => {});
 
-  const release = await response.json();
-  const latestVersion = String(release.tag_name || '').replace(/^v/i, '');
-  const asset = (release.assets || []).find(item =>
-    /^AutoSolveAI-v[^/]+\.zip$/i.test(item.name) && item.browser_download_url
-  );
-  if (!latestVersion || !asset) {
-    throw new Error('The latest GitHub release does not contain an AutoSolveAI ZIP asset.');
+  // Do not interrupt Auto-Pilot. A later alarm or manual update can apply it.
+  if (update.updateAvailable && update.linked && update.permission === "granted" &&
+      autoUpdate !== false && !isAutoPilotRunning) {
+    const result = await applyExtensionUpdate();
+    if (result.ok && result.reload) return update;
   }
-
-  const result = {
-    success: true,
-    currentVersion,
-    latestVersion,
-    updateAvailable: compareExtensionVersions(latestVersion, currentVersion) > 0,
-    releaseUrl: release.html_url,
-    downloadUrl: asset.browser_download_url,
-    checkedAt: Date.now(),
-    releaseNotes: release.body || '',
-  };
-  await chrome.storage.local.set({ autosolveUpdateStatus: result });
-  return result;
+  return update;
 }
 
-async function startExtensionUpdateDownload(url, filename) {
-  if (typeof url !== 'string' ||
-      !url.startsWith('https://github.com/SK64HD/autosolve_ai/releases/download/')) {
-    throw new Error('Refusing to download an update from an untrusted URL.');
-  }
-  const downloadId = await chrome.downloads.download({
-    url,
-    filename: filename || 'AutoSolveAI-update.zip',
-    saveAs: true,
-    conflictAction: 'uniquify',
-  });
-  return { success: true, downloadId };
+async function applyExtensionUpdate() {
+  const { githubFineGrainedToken } = await chrome.storage.local.get("githubFineGrainedToken");
+  const result = await AutoSolveUpdater.apply(githubFineGrainedToken || "");
+  if (result.ok && result.reload) setTimeout(() => chrome.runtime.reload(), 700);
+  return result;
 }
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.alarms.create(AUTOSOLVE_UPDATE_ALARM, { periodInMinutes: 360 });
-  checkForExtensionUpdate().catch(error => console.warn('[AutoSolve AI] Update check:', error.message));
+  checkForExtensionUpdate().catch(error => console.warn("[AutoSolve AI] Update check:", error.message));
 });
-
 chrome.runtime.onStartup.addListener(() => {
   chrome.alarms.create(AUTOSOLVE_UPDATE_ALARM, { periodInMinutes: 360 });
-  checkForExtensionUpdate().catch(error => console.warn('[AutoSolve AI] Update check:', error.message));
+  checkForExtensionUpdate().catch(error => console.warn("[AutoSolve AI] Update check:", error.message));
 });
-
 chrome.alarms.onAlarm.addListener(alarm => {
   if (alarm.name === AUTOSOLVE_UPDATE_ALARM) {
-    checkForExtensionUpdate().catch(error => console.warn('[AutoSolve AI] Update check:', error.message));
+    checkForExtensionUpdate().catch(error => console.warn("[AutoSolve AI] Update check:", error.message));
   }
 });
-
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message?.action === 'CHECK_FOR_UPDATES') {
+  if (message?.action === "CHECK_FOR_UPDATES") {
     checkForExtensionUpdate()
-      .then(sendResponse)
+      .then(updateStatus => sendResponse({ success: !updateStatus.error, updateStatus, error: updateStatus.error || null }))
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
   }
-
-  if (message?.action === 'DOWNLOAD_EXTENSION_UPDATE') {
-    startExtensionUpdateDownload(message.url, message.filename)
+  if (message?.action === "APPLY_EXTENSION_UPDATE") {
+    applyExtensionUpdate()
       .then(sendResponse)
-      .catch(error => sendResponse({ success: false, error: error.message }));
+      .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
     return true;
   }
 });
-
