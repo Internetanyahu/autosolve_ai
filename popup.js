@@ -494,24 +494,23 @@ document.addEventListener('DOMContentLoaded', async () => {
       target: { tabId: tab.id, allFrames: true },
       func: () => {
         const clean = value => String(value || '')
-          .replace(/\\u00a0/g, ' ')
-          .replace(/[ \\t]+\\n/g, '\\n')
-          .replace(/\\n{3,}/g, '\\n\\n')
+          .replace(/\u00a0/g, ' ')
+          .replace(/[ \t]+\n/g, '\n')
+          .replace(/\n{3,}/g, '\n\n')
           .trim();
 
         if (!document.documentElement) return { text: '' };
 
-        // Read from the live document first so dynamically populated controls are retained.
         const liveText = document.body?.innerText || document.documentElement.innerText || '';
         const clone = document.documentElement.cloneNode(true);
         clone.querySelectorAll(
           'script, style, noscript, template, svg, [aria-hidden="true"], #autosolve-copy-badge, #autosolve-ai-cursor, .autosolve-pulse-ring'
         ).forEach(el => el.remove());
 
-        clone.querySelectorAll('input, textarea, select').forEach(el => {
-          const live = document.querySelectorAll('input, textarea, select');
-          const index = Array.from(clone.querySelectorAll('input, textarea, select')).indexOf(el);
-          const liveEl = live[index];
+        const clonedControls = Array.from(clone.querySelectorAll('input, textarea, select'));
+        const liveControls = Array.from(document.querySelectorAll('input, textarea, select'));
+        clonedControls.forEach((el, index) => {
+          const liveEl = liveControls[index];
           const label = liveEl?.labels?.[0]?.innerText ||
             liveEl?.getAttribute('aria-label') ||
             liveEl?.getAttribute('name') ||
@@ -526,7 +525,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         const clonedText = clone.querySelector('body')?.innerText ||
           clone.innerText || clone.textContent || '';
-        const text = clean([liveText, clonedText].filter(Boolean).join('\\n\\n'));
+        const text = clean(clonedText || liveText);
         const selection = clean(window.getSelection?.()?.toString());
         return { text: selection.length > 8 ? selection : text };
       },
@@ -537,14 +536,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     for (const frame of frames || []) {
       const text = String(frame.result?.text || '').trim();
       if (text.length < 2) continue;
-      const key = text.replace(/\\s+/g, ' ').toLowerCase();
+      const key = text.replace(/\s+/g, ' ').toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
       chunks.push(text);
     }
     if (!chunks.length) throw new Error('No readable text found in the page or its accessible frames.');
 
-    const combined = chunks.join('\\n\\n===== EMBEDDED FRAME =====\\n\\n');
+    const combined = chunks.join('\n\n===== EMBEDDED FRAME =====\n\n');
     appendLog('INFO', 'Extracted ' + chunks.length + ' frame(s), ' + combined.length.toLocaleString() + ' characters. No character limit applied.');
     return combined;
   }
