@@ -86,13 +86,10 @@
     return response.json();
   }
   async function remoteExtensionSha(token) {
-    // Resolve the branch to its commit, then use the commit's tree SHA.
-    // The Git Trees API expects a SHA, not a branch name.
-    const ref = await gh("/git/ref/heads/" + BRANCH, token);
-    const commitSha = ref?.object?.sha;
-    if (!commitSha) throw new Error("Could not resolve branch " + BRANCH + " on GitHub.");
-    const commit = await gh("/git/commits/" + commitSha, token);
-    const treeSha = commit?.tree?.sha;
+    // The Git Trees API accepts a branch name directly. This is the same
+    // one-request check used by the PPUSA extension updater.
+    const tree = await gh("/git/trees/" + BRANCH, token);
+    const treeSha = tree?.sha;
     if (!treeSha) throw new Error("No repository tree found on " + BRANCH + ".");
     return treeSha;
   }
