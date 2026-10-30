@@ -16,18 +16,16 @@ document.addEventListener("DOMContentLoaded", () => {
       const info = response?.updateStatus;
       if (!info) throw new Error(response?.error || "Update check failed.");
       if (releaseLink) releaseLink.style.display = "none";
-      if (info.error) throw new Error(info.error);
+      if (info.error) throw new Error(info.error + (info.githubUrl ? " Repository: " + info.githubUrl : ""));
 
       if (!info.linked) {
-        status.textContent = info.updateAvailable
-          ? "Update available. Link the extension folder to install it in place."
-          : "Link the extension folder once to enable in-place updates.";
+        status.textContent = "Folder not linked. Select Set up to link it; then manually check for updates.";
         button.textContent = "Set up";
       } else if (info.updateAvailable) {
         status.textContent = "Update available. Changed files can be installed directly.";
         button.textContent = "Install update";
       } else {
-        status.textContent = "AutoSolve AI is up to date.";
+        status.textContent = "AutoSolve AI is up to date. Updates are manual.";
         button.textContent = "Update settings";
       }
     } catch (error) {
