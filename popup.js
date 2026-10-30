@@ -483,8 +483,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     chrome.storage.local.remove(['savedPastedText']);
   };
 
-  // Extract all readable page text from the active tab and every accessible frame.
-  // Do not impose a character limit: long lessons and reading passages must remain intact.
+  // Extract only rendered, user-facing text plus dropdown labels and choices.
   async function grabContentFromActiveTab() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) throw new Error('No active browser tab found.');
@@ -499,35 +498,68 @@ document.addEventListener('DOMContentLoaded', async () => {
           .replace(/\n{3,}/g, '\n\n')
           .trim();
 
-        if (!document.documentElement) return { text: '' };
+        const isVisible = el => {
+          if (!el || !el.isConnected) return false;
+          const style = getComputedStyle(el);
+          return style.display !== 'none' &&
+            style.visibility !== 'hidden' &&
+            style.visibility !== 'collapse' &&
+            Number(style.opacity) !== 0 &&
+            el.getClientRects().length > 0;
+        };
 
-        const liveText = document.body?.innerText || document.documentElement.innerText || '';
-        const clone = document.documentElement.cloneNode(true);
-        clone.querySelectorAll(
-          'script, style, noscript, template, svg, [aria-hidden="true"], #autosolve-copy-badge, #autosolve-ai-cursor, .autosolve-pulse-ring'
-        ).forEach(el => el.remove());
+        if (!document.body) return { text: '' };
+        const parts = [];
+        const selection = clean(window.getSelection?.()?.toString());
+        if (selection.length > 8) return { text: selection };
 
-        const clonedControls = Array.from(clone.querySelectorAll('input, textarea, select'));
-        const liveControls = Array.from(document.querySelectorAll('input, textarea, select'));
-        clonedControls.forEach((el, index) => {
-          const liveEl = liveControls[index];
-          const label = liveEl?.labels?.[0]?.innerText ||
-            liveEl?.getAttribute('aria-label') ||
-            liveEl?.getAttribute('name') ||
+        // innerText reflects rendered page text and excludes script/style source and most hidden UI.
+        const visibleText = clean(document.body.innerText || '');
+        if (visibleText) parts.push(visibleText);
+
+        const dropdowns = [];
+        const controls = Array.from(document.querySelectorAll('select, [role="combobox"], [aria-haspopup="listbox"]'));
+        controls.forEach((el, index) => {
+          if (!isVisible(el)) return;
+          const labelEl = el.labels?.[0] ||
+            el.closest('label') ||
+            (el.id ? document.querySelector('label[for="' + CSS.escape(el.id) + '"]') : null);
+          const label = clean(
+            labelEl?.innerText ||
             el.getAttribute('aria-label') ||
-            el.getAttribute('name') || '';
-          const value = liveEl?.value || liveEl?.selectedOptions?.[0]?.text ||
-            el.getAttribute('placeholder') || '';
-          const replacement = document.createElement('div');
-          replacement.textContent = [label, value].filter(Boolean).join(': ');
-          el.replaceWith(replacement);
+            el.getAttribute('title') ||
+            el.getAttribute('name') ||
+            ''
+          );
+          let options = [];
+          if (el.tagName === 'SELECT') {
+            options = Array.from(el.options)
+              .map(option => clean(option.textContent))
+              .filter(Boolean);
+          } else {
+            const listId = el.getAttribute('aria-controls') || el.getAttribute('aria-owns');
+            const list = listId ? document.getElementById(listId) : null;
+            const scope = list && isVisible(list) ? list : el.parentElement;
+            options = Array.from(scope?.querySelectorAll('[role="option"]') || [])
+              .filter(isVisible)
+              .map(option => clean(option.innerText || option.textContent))
+              .filter(Boolean);
+          }
+          const current = el.tagName === 'SELECT'
+            ? clean(el.selectedOptions?.[0]?.textContent || '')
+            : clean(el.getAttribute('aria-valuetext') || el.getAttribute('aria-label') || '');
+          const description = [
+            'Dropdown ' + (index + 1) + (label ? ' (' + label + ')' : ''),
+            current ? 'Selected: ' + current : '',
+            options.length ? 'Options: ' + options.join(' | ') : ''
+          ].filter(Boolean).join('\n');
+          if (description) dropdowns.push(description);
         });
 
-        const clonedText = clone.querySelector('body')?.innerText ||
-          clone.innerText || clone.textContent || '';
-        const text = clean(clonedText || liveText);
-        const selection = clean(window.getSelection?.()?.toString());
-        return { text: selection.length > 8 ? selection : text };
+        if (dropdowns.length) {
+          parts.push('=== DROPDOWNS ===\n' + dropdowns.join('\n\n'));
+        }
+        return { text: clean(parts.join('\n\n')) };
       },
     });
 
@@ -541,10 +573,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       seen.add(key);
       chunks.push(text);
     }
-    if (!chunks.length) throw new Error('No readable text found in the page or its accessible frames.');
-
+    if (!chunks.length) throw new Error('No visible page text or dropdown content was found.');
     const combined = chunks.join('\n\n===== EMBEDDED FRAME =====\n\n');
-    appendLog('INFO', 'Extracted ' + chunks.length + ' frame(s), ' + combined.length.toLocaleString() + ' characters. No character limit applied.');
+    appendLog('INFO', 'Extracted visible text from ' + chunks.length + ' frame(s), ' + combined.length.toLocaleString() + ' characters.');
     return combined;
   }
 
