@@ -8,6 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const customBaseUrlInput = document.getElementById('customBaseUrl');
   const customModelInput = document.getElementById('customModel');
   const customApiKeyInput = document.getElementById('customApiKey');
+  const customPromptInput = document.getElementById('customPrompt');
 
   const speedInput = document.getElementById('videoSpeed');
   const waitInput = document.getElementById('videoWaitSeconds');
@@ -35,6 +36,7 @@ document.addEventListener('DOMContentLoaded', () => {
       customApiKey: '',
       videoSpeed: 16,
       videoWaitSeconds: 15,
+      customPrompt: '',
     },
     (data) => {
       defaultModeSelect.value = data.defaultMode || 'text';
@@ -46,6 +48,10 @@ document.addEventListener('DOMContentLoaded', () => {
       customBaseUrlInput.value = data.customBaseUrl || '';
       customModelInput.value = data.customModel || '';
       customApiKeyInput.value = data.customApiKey || '';
+      if (customPromptInput) {
+        if (data.customPrompt) customPromptInput.value = data.customPrompt;
+        else fetch(chrome.runtime.getURL('prompt.txt')).then(r => r.text()).then(t => { if (!customPromptInput.value) customPromptInput.value = t; }).catch(() => {});
+      }
       speedInput.value = data.videoSpeed || 16;
       waitInput.value = data.videoWaitSeconds || 15;
     }
@@ -62,6 +68,7 @@ document.addEventListener('DOMContentLoaded', () => {
       customBaseUrl: customBaseUrlInput.value.trim(),
       customModel: customModelInput.value.trim(),
       customApiKey: customApiKeyInput.value.trim(),
+      customPrompt: customPromptInput ? customPromptInput.value : '',
       videoSpeed: Math.min(16, Math.max(1, Number(speedInput.value) || 16)),
       videoWaitSeconds: Math.max(3, Number(waitInput.value) || 15),
     };
