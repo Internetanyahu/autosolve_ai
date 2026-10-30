@@ -119,18 +119,14 @@
   <div class="section-title">API Prompt</div>
   <label for="customPrompt">System prompt sent to the AI</label>
   <textarea id="customPrompt" rows="14" style="width:100%; box-sizing:border-box; background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:6px; padding:10px; font:12px/1.5 monospace; resize:vertical;"></textarea>
-  <p class="hint">Edit the instructions used for API requests. The default comes from prompt.txt. Your saved prompt is used for text and vision requests.</p>
+  <p class="hint">Edit the instructions used for API requests. The default comes from prompt.txt. Your saved prompt is the only system prompt used for solving.</p>
 
   <div class="section-title">Video Acceleration Preferences</div>
   <label for="videoSpeed">Video Playback Rate</label>
   <input type="number" id="videoSpeed" value="16" min="1" max="16" step="1">
   <p class="hint">Standard speed multiplier for lecture video modules (1x to 16x).</p>
 
-  <label for="videoWaitSeconds">Video Auto-Next Dwell Time (seconds)</label>
-  <input type="number" id="videoWaitSeconds" value="15" min="3" max="120" step="1">
-  <p class="hint">Seconds to wait after accelerating video before clicking Next.</p>
-
-  <div class="btn-row">
+<div class="btn-row">
     <button class="btn-save" id="save-btn">Save All Settings</button>
     <button class="btn-test" id="test-btn">Test Active Key</button>
   </div>
