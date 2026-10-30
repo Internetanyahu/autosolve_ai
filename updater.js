@@ -46,25 +46,43 @@
       "Accept": "application/vnd.github+json",
       "X-GitHub-Api-Version": "2022-11-28"
     };
-    if (token) headers.Authorization = "Bearer " + token;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
-    let response;
-    try {
-      response = await fetch(API + path, {
-        headers,
-        cache: "no-store",
-        signal: controller.signal
-      });
-    } catch (error) {
-      if (error?.name === "AbortError") throw new Error("GitHub request timed out after 15 seconds.");
-      throw error;
-    } finally {
-      clearTimeout(timeout);
+
+    async function request(authToken) {
+      const requestHeaders = { ...headers };
+      if (authToken) requestHeaders.Authorization = "Bearer " + authToken;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+      try {
+        return await fetch(API + path, {
+          headers: requestHeaders,
+          cache: "no-store",
+          signal: controller.signal
+        });
+      } catch (error) {
+        if (error?.name === "AbortError") throw new Error("GitHub request timed out after 15 seconds.");
+        throw error;
+      } finally {
+        clearTimeout(timeout);
+      }
     }
-    if (response.status === 401 || response.status === 403) throw new Error("GitHub rejected the saved token (" + response.status + ").");
-    if (response.status === 404) throw new Error("Repository or branch not found (404). Check that the token can read " + REPO + ".");
-    if (!response.ok) throw new Error("GitHub request failed (" + response.status + ").");
+
+    // Always try the public repository anonymously first. Only retry with the
+    // saved token when GitHub says authentication/access may be required.
+    let response = await request("");
+    if ([401, 403, 404].includes(response.status) && token) {
+      response = await request(token);
+    }
+
+    if (!response.ok) {
+      if ([401, 403, 404].includes(response.status)) {
+        throw new Error(
+          response.status === 404
+            ? "GitHub could not find this repository or branch. It may be private; verify the repository URL and saved token."
+            : "GitHub denied access (" + response.status + "). Check the saved token's repository access."
+        );
+      }
+      throw new Error("GitHub request failed (" + response.status + ").");
+    }
     return response.json();
   }
   async function remoteExtensionSha(token) {
@@ -173,24 +191,20 @@
     return (await chrome.storage.local.get("updaterState")).updaterState || {};
   }
 
-  // Cheap check (one GitHub request). Never touches local files.
+  // Check the configured GitHub repository first. A local folder link is
+  // relevant only when installing, never when discovering repository updates.
   async function check(token) {
-    // Resolve the local folder first. This is a local IndexedDB lookup and does
-    // not contact GitHub or require a token.
-    const handle = await getHandle().catch(() => null);
-    let permission = "none";
-    if (handle) permission = await handle.queryPermission({ mode: "readwrite" }).catch(() => "prompt");
-
     const prior = await getUpdaterState();
     try {
-      // Public repositories work without an API key. A token is only needed
-      // when GitHub requires authentication (for example, a private repository).
       const remoteSha = await remoteExtensionSha(token);
       let appliedSha = prior.appliedSha;
       if (!appliedSha) {
         appliedSha = remoteSha;
         await chrome.storage.local.set({ updaterState: { ...prior, appliedSha } });
       }
+      const handle = await getHandle().catch(() => null);
+      let permission = "none";
+      if (handle) permission = await handle.queryPermission({ mode: "readwrite" }).catch(() => "prompt");
       return {
         currentVersion: chrome.runtime.getManifest().version,
         remoteSha, appliedSha,
@@ -202,13 +216,14 @@
         error: null
       };
     } catch (error) {
+      const handle = await getHandle().catch(() => null);
       const message = error?.message || "GitHub check failed.";
       const authHint = !token
-        ? " No GitHub token is saved. Public repositories do not need one; if this repository is private, add a fine-grained token with Contents: Read-only access."
+        ? " If the repository is private, save a fine-grained GitHub token with Contents: Read-only access."
         : "";
       return {
         currentVersion: chrome.runtime.getManifest().version,
-        linked: Boolean(handle), permission,
+        linked: Boolean(handle),
         lastApplied: prior.lastApplied || null,
         checkedAt: new Date().toISOString(),
         githubUrl: "https://github.com/" + REPO,
@@ -217,78 +232,3 @@
     }
   }
 
-  // Downloads changed files and writes them into the linked folder.
-  // The caller reloads the extension when result.reload is true.
-  async function apply(token, { interactive = false } = {}) {
-    if (!navigator.locks) return runApply(token, interactive);
-    return navigator.locks.request("autosolve-ai-extension-update", { ifAvailable: true }, async lock => {
-      if (!lock) return { ok: false, busy: true, error: "Another update is already running." };
-      return runApply(token, interactive);
-    });
-  }
-  async function runApply(token, interactive) {
-    const handle = await getHandle();
-    if (!handle) return { ok: false, needsLink: true, error: "The extension folder isn't linked yet." };
-    let permission = await handle.queryPermission({ mode: "readwrite" });
-    if (permission !== "granted" && interactive) permission = await handle.requestPermission({ mode: "readwrite" });
-    if (permission !== "granted") return { ok: false, needsPermission: true, error: "Folder access needs to be granted again." };
-
-    const remoteSha = await remoteExtensionSha(token);
-    const files = await remoteFiles(token, remoteSha);
-    if (!files.some(file => file.path === "manifest.json")) throw new Error("The remote extension folder has no manifest.json; refusing to update.");
-
-    const changed = [];
-    for (const file of files) {
-      const local = await readLocal(handle, file.path);
-      if (file.path === "manifest.json" && local) {
-        const remoteBytes = await downloadBlob(token, file.sha);
-        if (await gitBlobSha(remoteBytes) !== file.sha) throw new Error("Download of manifest.json failed its integrity check.");
-        if (!manifestsEqualExceptVersion(local, remoteBytes)) {
-          changed.push({ ...file, preloadedBytes: remoteBytes, localManifest: local });
-        }
-      } else if (!local || await gitBlobSha(local) !== file.sha) {
-        changed.push(file);
-      }
-    }
-    // manifest.json goes last so a failure never leaves it pointing at missing files.
-    changed.sort((a, b) => (a.path === "manifest.json") - (b.path === "manifest.json"));
-
-    // Download and verify everything before writing anything.
-    const downloaded = [];
-    for (const file of changed) {
-      const sourceBytes = file.preloadedBytes || await downloadBlob(token, file.sha);
-      if (await gitBlobSha(sourceBytes) !== file.sha) throw new Error("Download of " + file.path + " failed its integrity check.");
-      const bytes = file.path === "manifest.json" && file.localManifest
-        ? preserveInstalledManifestVersion(sourceBytes, file.localManifest)
-        : sourceBytes;
-      downloaded.push({ file, bytes, sourceBytes });
-    }
-    const manifest = downloaded.find(item => item.file.path === "manifest.json");
-    if (manifest) {
-      const parsed = JSON.parse(new TextDecoder().decode(manifest.sourceBytes));
-      if (parsed.manifest_version !== 3 || parsed.name !== EXPECTED_NAME) throw new Error("The new manifest.json doesn't look right; refusing to install it.");
-    }
-
-    for (const { file, bytes, sourceBytes } of downloaded) {
-      await writeLocal(handle, file.path, bytes);
-      const written = await readLocal(handle, file.path);
-      const verified = file.path === "manifest.json"
-        ? written && manifestsEqualExceptVersion(written, sourceBytes)
-        : written && await gitBlobSha(written) === file.sha;
-      if (!verified) throw new Error("Could not verify " + file.path + " after writing it.");
-    }
-
-    const prior = await getUpdaterState();
-    await chrome.storage.local.set({
-      updaterState: {
-        ...prior,
-        appliedSha: remoteSha,
-        lastApplied: new Date().toISOString(),
-        lastAppliedFiles: changed.map(file => file.path)
-      }
-    });
-    return { ok: true, changed: changed.map(file => file.path), reload: changed.length > 0 };
-  }
-
-  self.AutoSolveUpdater = { check, apply, linkFolder, getHandle, clearHandle };
-})();
