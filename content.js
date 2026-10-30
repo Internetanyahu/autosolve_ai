@@ -1136,159 +1136,114 @@
     } catch {}
   }
 
-  // Intelligent Question & Choice Extractor (traverses Edgenuity stageFrame, nested iframes & DOM)
+  // Extract rendered, user-facing text and dropdown labels/options only.
   function extractPageQuestionAndChoices() {
-    // 1. Visually highlight all text across document & nested stageFrame
-    highlightAllTextOnPage();
-
-    // 2. Check if user selected text with mouse cursor
-    let selectedText = '';
-    try {
-      selectedText = window.getSelection()?.toString()?.trim() || '';
-      if (!selectedText) {
-        const docs = getAllDocuments();
-        for (const d of docs) {
-          const sel = d.getSelection?.()?.toString()?.trim();
-          if (sel) { selectedText = sel; break; }
-        }
-      }
-    } catch {}
-
-    if (selectedText && selectedText.length > 8) {
-      return {
-        source: 'user_selection',
-        text: selectedText,
-      };
-    }
-
-    // 3. Scan documents (including Edgenuity stageFrame and activity containers)
     const docs = getAllDocuments();
-    let bestQuestion = '';
-    let choices = [];
-    let dropdowns = [];
-    let largestStageText = '';
-    const pageTexts = [];
+    const clean = value => String(value || '')
+      .replace(/\u00a0/g, ' ')
+      .replace(/[ \t]+\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
 
+    // Respect an explicit user text selection when one exists.
     for (const doc of docs) {
-      if (!doc || !doc.body) continue;
-
-      // Extract full text of stage / main content / body (UNTRUNCATED)
-      const stage = doc.querySelector('#stageFrame, .stageFrame, #activity-container, .main-content, #content, main') || doc.body;
-      // Capture the full visible document, not only the largest question/activity container.
-      const stageText = (doc.body?.innerText || stage?.innerText || '').trim();
-      if (stageText) pageTexts.push(stageText);
-
-      // Question prompts
-      const qSelectors = [
-        '.QuestionText',
-        '.question_text',
-        '.question-prompt',
-        '.prompt',
-        '.assessment-question',
-        '.question-container p',
-        '.questionText',
-        '.question',
-        '[data-testid="question-title"]',
-        '.form-prompt',
-        'h3.question',
-        '.reading-passage',
-        '#questionText',
-        '.instruction-text',
-      ];
-
-      for (const sel of qSelectors) {
-        const els = doc.querySelectorAll(sel);
-        for (const el of els) {
-          const txt = el.innerText?.trim();
-          if (txt && txt.length > 15 && (!bestQuestion || txt.length > bestQuestion.length)) {
-            bestQuestion = txt;
-          }
+      try {
+        const selected = clean(doc.getSelection?.()?.toString());
+        if (selected.length > 8) {
+          return { source: 'user_selection', text: selected };
         }
-      }
-
-      // Choice containers
-      const cSelectors = [
-        '.answer-choice',
-        '.choice-container',
-        '.Option',
-        '.answer_label',
-        'label.choice',
-        'li.choice',
-        '.option-text',
-        '.mc-option',
-        'table.options td',
-        '.answer-option',
-      ];
-
-      for (const sel of cSelectors) {
-        const els = doc.querySelectorAll(sel);
-        if (els.length >= 2) {
-          const extracted = Array.from(els)
-            .map((el) => el.innerText?.trim())
-            .filter((t) => t && t.length > 0 && !t.startsWith('Choose'));
-          if (extracted.length >= 2 && extracted.length > choices.length) {
-            choices = extracted;
-          }
-        }
-      }
-
-      // <select> dropdowns
-      const selects = doc.querySelectorAll('select');
-      if (selects.length > 0) {
-        selects.forEach((s, idx) => {
-          const optTexts = Array.from(s.options).map((o) => o.text.trim()).filter((t) => t && !t.includes('Select'));
-          const parentLabel = s.closest('label, p, div')?.innerText?.split('\n')[0] || `Dropdown ${idx + 1}`;
-          dropdowns.push(`Dropdown [${idx + 1}] (${parentLabel}): Options: [${optTexts.join(' | ')}]`);
-        });
-      }
+      } catch {}
     }
 
-    // Combine every accessible document/frame while removing exact duplicate frame content.
-    const seenPageTexts = new Set();
-    largestStageText = pageTexts.filter(text => {
+    const frameTexts = [];
+    for (const doc of docs) {
+      if (!doc?.body) continue;
+
+      const isVisible = el => {
+        try {
+          if (!el || !el.isConnected) return false;
+          const style = (doc.defaultView || window).getComputedStyle(el);
+          return style.display !== 'none' &&
+            style.visibility !== 'hidden' &&
+            style.visibility !== 'collapse' &&
+            Number(style.opacity) !== 0 &&
+            el.getClientRects().length > 0;
+        } catch {
+          return false;
+        }
+      };
+
+      // innerText returns rendered text, rather than hidden DOM, scripts, or markup.
+      const parts = [];
+      const visibleText = clean(doc.body.innerText || '');
+      if (visibleText) parts.push(visibleText);
+
+      const dropdowns = [];
+      const controls = Array.from(doc.querySelectorAll(
+        'select, [role="combobox"], [aria-haspopup="listbox"]'
+      ));
+      controls.forEach((el, index) => {
+        if (!isVisible(el)) return;
+
+        let labelEl = null;
+        try {
+          labelEl = el.labels?.[0] ||
+            el.closest('label') ||
+            (el.id ? doc.querySelector('label[for="' + el.id.replace(/"/g, '\\"') + '"]') : null);
+        } catch {}
+
+        const label = clean(
+          labelEl?.innerText ||
+          el.getAttribute('aria-label') ||
+          el.getAttribute('title') ||
+          el.getAttribute('name') ||
+          ''
+        );
+
+        let options = [];
+        if (el.tagName === 'SELECT') {
+          options = Array.from(el.options)
+            .map(option => clean(option.textContent))
+            .filter(Boolean);
+        } else {
+          const listId = el.getAttribute('aria-controls') || el.getAttribute('aria-owns');
+          const list = listId ? doc.getElementById(listId) : null;
+          const scope = list && isVisible(list) ? list : el.parentElement;
+          options = Array.from(scope?.querySelectorAll('[role="option"]') || [])
+            .filter(isVisible)
+            .map(option => clean(option.innerText || option.textContent))
+            .filter(Boolean);
+        }
+
+        const current = el.tagName === 'SELECT'
+          ? clean(el.selectedOptions?.[0]?.textContent || '')
+          : clean(el.getAttribute('aria-valuetext') || '');
+        const description = [
+          'Dropdown ' + (index + 1) + (label ? ' (' + label + ')' : ''),
+          current ? 'Selected: ' + current : '',
+          options.length ? 'Options: ' + options.join(' | ') : ''
+        ].filter(Boolean).join('\n');
+        if (description) dropdowns.push(description);
+      });
+
+      if (dropdowns.length) {
+        parts.push('=== DROPDOWNS ===\n' + dropdowns.join('\n\n'));
+      }
+      const frameText = clean(parts.join('\n\n'));
+      if (frameText) frameTexts.push(frameText);
+    }
+
+    const seen = new Set();
+    const uniqueTexts = frameTexts.filter(text => {
       const key = text.replace(/\s+/g, ' ').toLowerCase();
-      if (seenPageTexts.has(key)) return false;
-      seenPageTexts.add(key);
+      if (seen.has(key)) return false;
+      seen.add(key);
       return true;
-    }).join('\n\n===== EMBEDDED FRAME =====\n\n');
-
-    // 4. Assemble structured question text without ANY artificial character limits
-    let assembled = '';
-
-    // If largestStageText has rich content (reading passages + questions + choices), preserve it completely
-    if (largestStageText && largestStageText.length > 80) {
-      assembled = largestStageText;
-
-      // If specific multiple-choice elements were detected that might not be clearly labeled in raw text, append them
-      if (choices.length > 0 && !assembled.includes(choices[0])) {
-        assembled += '\n\n=== MULTIPLE CHOICE OPTIONS ===\n';
-        choices.forEach((c, idx) => {
-          const letter = String.fromCharCode(65 + idx);
-          assembled += `[${idx + 1}] (${letter}) ${c}\n`;
-        });
-      }
-
-      if (dropdowns.length > 0 && !assembled.includes('Dropdown [1]')) {
-        assembled += `\n\n=== DROPDOWNS ===\n${dropdowns.join('\n')}\n`;
-      }
-    } else if (bestQuestion) {
-      assembled = `${bestQuestion}\n\n`;
-      if (choices.length > 0) {
-        choices.forEach((c, idx) => {
-          const letter = String.fromCharCode(65 + idx);
-          assembled += `[${idx + 1}] (${letter}) ${c}\n`;
-        });
-      }
-      if (dropdowns.length > 0) {
-        assembled += `\n${dropdowns.join('\n')}\n`;
-      }
-    } else {
-      assembled = document.body.innerText?.trim() || '';
-    }
+    });
 
     return {
-      source: 'entire_page_highlighted',
-      text: assembled.trim(),
+      source: 'visible_page_text_and_dropdowns',
+      text: uniqueTexts.join('\n\n===== EMBEDDED FRAME =====\n\n').trim(),
     };
   }
 
