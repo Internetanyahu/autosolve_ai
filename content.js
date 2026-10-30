@@ -832,6 +832,20 @@
     return false;
   }
 
+  function setVideoBoost(enabled, speed = 16.0) {
+    const docs = getAllDocuments();
+    const videos = docs.flatMap((d) => Array.from(d.querySelectorAll('video')));
+    if (!videos.length) {
+      addLog('VIDEO', 'No HTML5 video element detected across accessible frames');
+      return { success: false, count: 0 };
+    }
+    videos.forEach((video) => { video.playbackRate = enabled ? speed : 1.0; });
+    addLog('VIDEO', enabled
+      ? `Video boost enabled: ${videos.length} video(s) set to ${speed}x.`
+      : `Video boost disabled: ${videos.length} video(s) reset to 1x.`);
+    return { success: true, count: videos.length };
+  }
+
   async function accelerateVideos(speed = 16.0, triggerNext = true, nextCoords = null) {
     const docs = getAllDocuments();
     const videos = docs.flatMap((d) => Array.from(d.querySelectorAll('video')));
@@ -1303,10 +1317,12 @@
         sendResponse({ success: false, error: err.message });
       }
       return true;
-    } else if (request.action === 'BOOST_VIDEO_16X') {
-      accelerateVideos(16.0, true)
-        .then((res) => sendResponse({ success: true, count: res }))
-        .catch((err) => sendResponse({ success: false, error: err.message }));
+    } else if (request.action === 'SET_VIDEO_BOOST') {
+      try {
+        sendResponse(setVideoBoost(Boolean(request.enabled), Number(request.speed) || 16));
+      } catch (err) {
+        sendResponse({ success: false, error: err.message });
+      }
       return true;
     } else if (request.action === 'TRIGGER_MANUAL_NEXT') {
       advanceNextButton().then((clicked) => {
