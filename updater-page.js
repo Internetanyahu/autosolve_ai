@@ -19,10 +19,16 @@ async function render() {
   const info = response?.updateStatus;
   const linkStatus = $("linkStatus");
   const updateStatus = $("updateStatus");
+  const repoLink = $("repoLink");
   if (!info) {
+    if (repoLink) repoLink.style.display = "inline";
     updateStatus.className = "msg error";
     updateStatus.textContent = response?.error || "Couldn't reach the extension's background worker.";
     return info;
+  }
+  if (repoLink) {
+    repoLink.href = info.githubUrl || "https://github.com/SK64HD/autosolve_ai";
+    repoLink.style.display = info.error ? "inline" : "none";
   }
   linkStatus.className = "msg" + (info.linked ? " good" : "");
   linkStatus.textContent = info.linked
