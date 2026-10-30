@@ -483,7 +483,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     chrome.storage.local.remove(['savedPastedText']);
   };
 
-  // Helper to extract content directly from active tab
+  // Extract all readable page text from the active tab and every accessible frame.
+  // Do not impose a character limit: long lessons and reading passages must remain intact.
   async function grabContentFromActiveTab() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id) throw new Error('No active browser tab found.');
@@ -492,20 +493,42 @@ document.addEventListener('DOMContentLoaded', async () => {
     const frames = await chrome.scripting.executeScript({
       target: { tabId: tab.id, allFrames: true },
       func: () => {
-        const clean = value => String(value || '').replace(/\u00a0/g, ' ').replace(/[ \t]+\n/g, '\n').trim();
-        const selection = clean(window.getSelection?.()?.toString());
-        if (selection.length > 8) return { text: selection };
-        if (!document.body) return { text: '' };
-        const clone = document.body.cloneNode(true);
-        clone.querySelectorAll('script, style, noscript, template, svg, [aria-hidden="true"]').forEach(el => el.remove());
+        const clean = value => String(value || '')
+          .replace(/\\u00a0/g, ' ')
+          .replace(/[ \\t]+\\n/g, '\\n')
+          .replace(/\\n{3,}/g, '\\n\\n')
+          .trim();
+
+        if (!document.documentElement) return { text: '' };
+
+        // Read from the live document first so dynamically populated controls are retained.
+        const liveText = document.body?.innerText || document.documentElement.innerText || '';
+        const clone = document.documentElement.cloneNode(true);
+        clone.querySelectorAll(
+          'script, style, noscript, template, svg, [aria-hidden="true"], #autosolve-copy-badge, #autosolve-ai-cursor, .autosolve-pulse-ring'
+        ).forEach(el => el.remove());
+
         clone.querySelectorAll('input, textarea, select').forEach(el => {
-          const label = el.labels?.[0]?.innerText || el.getAttribute('aria-label') || el.getAttribute('name') || '';
-          const value = el.value || el.getAttribute('placeholder') || '';
+          const live = document.querySelectorAll('input, textarea, select');
+          const index = Array.from(clone.querySelectorAll('input, textarea, select')).indexOf(el);
+          const liveEl = live[index];
+          const label = liveEl?.labels?.[0]?.innerText ||
+            liveEl?.getAttribute('aria-label') ||
+            liveEl?.getAttribute('name') ||
+            el.getAttribute('aria-label') ||
+            el.getAttribute('name') || '';
+          const value = liveEl?.value || liveEl?.selectedOptions?.[0]?.text ||
+            el.getAttribute('placeholder') || '';
           const replacement = document.createElement('div');
           replacement.textContent = [label, value].filter(Boolean).join(': ');
           el.replaceWith(replacement);
         });
-        return { text: clean(clone.innerText || clone.textContent) };
+
+        const clonedText = clone.querySelector('body')?.innerText ||
+          clone.innerText || clone.textContent || '';
+        const text = clean([liveText, clonedText].filter(Boolean).join('\\n\\n'));
+        const selection = clean(window.getSelection?.()?.toString());
+        return { text: selection.length > 8 ? selection : text };
       },
     });
 
@@ -514,14 +537,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     for (const frame of frames || []) {
       const text = String(frame.result?.text || '').trim();
       if (text.length < 2) continue;
-      const key = text.replace(/\s+/g, ' ').toLowerCase();
+      const key = text.replace(/\\s+/g, ' ').toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
       chunks.push(text);
     }
     if (!chunks.length) throw new Error('No readable text found in the page or its accessible frames.');
-    const combined = chunks.join('\n\n===== EMBEDDED FRAME =====\n\n');
-    appendLog('INFO', 'Extracted ' + chunks.length + ' frame(s), ' + combined.length.toLocaleString() + ' characters.');
+
+    const combined = chunks.join('\\n\\n===== EMBEDDED FRAME =====\\n\\n');
+    appendLog('INFO', 'Extracted ' + chunks.length + ' frame(s), ' + combined.length.toLocaleString() + ' characters. No character limit applied.');
     return combined;
   }
 
