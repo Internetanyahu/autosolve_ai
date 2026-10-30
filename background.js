@@ -473,16 +473,6 @@ chrome.commands.onCommand.addListener((command) => {
   if (command === 'auto_copy_solve') {
     logEvent('ACTION', 'Shortcut Alt+Shift+C detected: Auto-copying page & solving...');
     handleAutoCopyAndSolve();
-  } else if (command === 'trigger_autosolve') {
-    logEvent('ACTION', 'Shortcut Alt+Shift+S detected: Initiating Vision Auto-Solve...');
-    handleCaptureAndSolve({ autoClickNext: true });
-  } else if (command === 'boost_video') {
-    logEvent('VIDEO', 'Shortcut Alt+Shift+V detected: Accelerating video to 16x...');
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (tabs[0]?.id) {
-        chrome.tabs.sendMessage(tabs[0].id, { action: 'BOOST_VIDEO_16X' });
-      }
-    });
   } else if (command === 'toggle_sidebar') {
     logEvent('ACTION', 'Shortcut Alt+Shift+P detected: Toggling persistent sidebar/window...');
     handleToggleSidePanelOrPopout();
@@ -756,8 +746,13 @@ function compareExtensionVersions(left, right) {
 
 async function checkForExtensionUpdate() {
   const currentVersion = chrome.runtime.getManifest().version;
+  const stored = await chrome.storage.local.get(['githubFineGrainedToken']);
+  const headers = { Accept: 'application/vnd.github+json' };
+  if (stored.githubFineGrainedToken) {
+    headers.Authorization = `Bearer ${stored.githubFineGrainedToken}`;
+  }
   const response = await fetch(AUTOSOLVE_RELEASES_API, {
-    headers: { Accept: 'application/vnd.github+json' },
+    headers,
     cache: 'no-store',
   });
   if (!response.ok) {
