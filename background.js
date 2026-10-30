@@ -312,63 +312,28 @@ async function queryGeminiDirectly(base64Image, apiKey, prompt = '') {
   throw lastError || new Error('Gemini request failed.');
 }
 
-// In-place GitHub updater, using the same folder-linking mechanism as PPUSA.
+// Manual-only GitHub updater. No startup checks, scheduled checks, or automatic installs.
 importScripts("updater.js");
-const AUTOSOLVE_UPDATE_ALARM = "autosolve-ai-update-check";
 
 async function checkForExtensionUpdate() {
-  const { githubFineGrainedToken, autoUpdate = true } = await chrome.storage.local.get(["githubFineGrainedToken", "autoUpdate"]);
-  let update;
-  try {
-    update = await AutoSolveUpdater.check(githubFineGrainedToken || "");
-  } catch (error) {
-    const { autosolveUpdateStatus = {} } = await chrome.storage.local.get("autosolveUpdateStatus");
-    update = {
-      ...autosolveUpdateStatus,
-      currentVersion: chrome.runtime.getManifest().version,
-      checkedAt: new Date().toISOString(),
-      error: error?.message || "Update check failed"
-    };
-    await chrome.storage.local.set({ autosolveUpdateStatus: update });
-    return update;
-  }
-  update.autoUpdate = autoUpdate !== false;
+  const { githubFineGrainedToken } = await chrome.storage.local.get("githubFineGrainedToken");
+  const update = await AutoSolveUpdater.check(githubFineGrainedToken || "");
   await chrome.storage.local.set({ autosolveUpdateStatus: update });
-  chrome.runtime.sendMessage({ action: "UPDATE_STATUS_CHANGED" }).catch(() => {});
-
-  if (update.updateAvailable && update.linked && update.permission === "granted" &&
-      autoUpdate !== false) {
-    const result = await applyExtensionUpdate();
-    if (result.ok && result.reload) return update;
-  }
   return update;
 }
 
 async function applyExtensionUpdate() {
   const { githubFineGrainedToken } = await chrome.storage.local.get("githubFineGrainedToken");
-  const result = await AutoSolveUpdater.apply(githubFineGrainedToken || "");
+  const result = await AutoSolveUpdater.apply(githubFineGrainedToken || "", { interactive: true });
   if (result.ok && result.reload) setTimeout(() => chrome.runtime.reload(), 700);
   return result;
 }
 
-chrome.runtime.onInstalled.addListener(() => {
-  chrome.alarms.create(AUTOSOLVE_UPDATE_ALARM, { periodInMinutes: 360 });
-  checkForExtensionUpdate().catch(error => console.warn("[AutoSolve AI] Update check:", error.message));
-});
-chrome.runtime.onStartup.addListener(() => {
-  chrome.alarms.create(AUTOSOLVE_UPDATE_ALARM, { periodInMinutes: 360 });
-  checkForExtensionUpdate().catch(error => console.warn("[AutoSolve AI] Update check:", error.message));
-});
-chrome.alarms.onAlarm.addListener(alarm => {
-  if (alarm.name === AUTOSOLVE_UPDATE_ALARM) {
-    checkForExtensionUpdate().catch(error => console.warn("[AutoSolve AI] Update check:", error.message));
-  }
-});
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.action === "CHECK_FOR_UPDATES") {
     checkForExtensionUpdate()
       .then(updateStatus => sendResponse({ success: !updateStatus.error, updateStatus, error: updateStatus.error || null }))
-      .catch(error => sendResponse({ success: false, error: error.message }));
+      .catch(error => sendResponse({ success: false, error: error?.message || String(error) }));
     return true;
   }
   if (message?.action === "APPLY_EXTENSION_UPDATE") {
