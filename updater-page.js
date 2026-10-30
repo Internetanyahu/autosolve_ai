@@ -5,6 +5,7 @@ const checkButton = $("check");
 const applyButton = $("apply");
 let busy = false;
 let checkPromise = null;
+let lastInfo = null;
 
 const log = message => { logEl.textContent += "\n" + message; };
 const getToken = async () => (await chrome.storage.local.get("githubFineGrainedToken")).githubFineGrainedToken || "";
@@ -14,7 +15,7 @@ function setBusy(value) {
   busy = value;
   linkButton.disabled = value;
   checkButton.disabled = value || Boolean(checkPromise);
-  applyButton.disabled = value;
+  applyButton.disabled = value || !lastInfo?.linked || !lastInfo?.updateAvailable;
 }
 
 function render() {
@@ -36,6 +37,7 @@ function render() {
       const info = response?.updateStatus;
 
       if (!info) {
+        lastInfo = null;
         throw new Error(response?.error || "Couldn't reach the extension's background worker.");
       }
 
@@ -44,6 +46,7 @@ function render() {
         repoLink.style.display = info.error ? "inline" : "none";
       }
 
+      lastInfo = info;
       linkStatus.className = "msg" + (info.linked ? " good" : "");
       linkStatus.textContent = info.linked
         ? (info.permission === "granted"
@@ -71,6 +74,7 @@ function render() {
       }
       updateStatus.className = "msg error";
       updateStatus.textContent = error?.message || String(error);
+      lastInfo = null;
       applyButton.disabled = true;
       return null;
     }
