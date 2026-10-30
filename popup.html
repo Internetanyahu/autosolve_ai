@@ -320,13 +320,7 @@
     <button id="update-download" disabled style="background:#2563eb; color:#fff; border:0; border-radius:4px; padding:6px 9px; font-size:10px; font-weight:700; cursor:pointer; opacity:.55;">Download update</button>
   </div>
 
-  <!-- Mode Selector: Text Mode (Passive / Copy-Paste) vs Vision Mode (Auto-Click) -->
-  <div class="mode-bar">
-    <button class="mode-btn active" id="mode-tab-text">Text Mode (Q&A / Numbered Answers)</button>
-    <button class="mode-btn" id="mode-tab-vision">Vision Mode (Auto-Clicker)</button>
-  </div>
-
-  <!-- AI Provider & Key Config Box -->
+<!-- AI Provider & Key Config Box -->
   <div class="key-box">
     <div class="key-label">
       <span>AI PROVIDER</span>
@@ -377,30 +371,7 @@
     </div>
   </div>
 
-  <!-- 2. VISION MODE SECTION (Active Screen Clicker / Auto-Pilot) -->
-  <div id="section-vision-mode" style="display:none;">
-    <button class="btn btn-primary" id="btn-scan">
-      Scan & Solve Active Tab
-    </button>
-
-    <div class="row">
-      <button class="btn btn-autopilot" id="btn-autopilot" style="margin-bottom:0; flex:1;">
-        Start Auto-Pilot
-      </button>
-      <button class="btn btn-video" id="btn-video" style="margin-bottom:0; flex:1;">
-        16x Video Boost
-      </button>
-    </div>
-
-    <div style="display:flex; gap:6px; margin-top:8px; margin-bottom:10px;">
-      <button id="btn-manual-next" style="flex:1; background:#1e293b; border:1px solid #334155; color:#38bdf8; font-size:11px; font-weight:600; padding:7px 10px; border-radius:5px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; transition:all 0.15s ease;">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-        <span>Advance / Next Activity (.FrameRight)</span>
-      </button>
-    </div>
-  </div>
-
-  <!-- Live Output Console (Outputs Numbered Answers: [1], [2], etc.) -->
+<!-- Live Output Console (Outputs Numbered Answers: [1], [2], etc.) -->
   <div class="console-header" style="margin-top:8px;">
     <span>OUTPUT & NUMBERED ANSWERS</span>
     <button id="btn-clear" style="background:none; border:none; color:#64748b; cursor:pointer; font-size:10px;">Clear Console</button>
