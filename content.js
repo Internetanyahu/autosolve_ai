@@ -1167,16 +1167,16 @@
     let choices = [];
     let dropdowns = [];
     let largestStageText = '';
+    const pageTexts = [];
 
     for (const doc of docs) {
       if (!doc || !doc.body) continue;
 
       // Extract full text of stage / main content / body (UNTRUNCATED)
       const stage = doc.querySelector('#stageFrame, .stageFrame, #activity-container, .main-content, #content, main') || doc.body;
-      const stageText = stage?.innerText?.trim() || '';
-      if (stageText.length > largestStageText.length) {
-        largestStageText = stageText;
-      }
+      // Capture the full visible document, not only the largest question/activity container.
+      const stageText = (doc.body?.innerText || stage?.innerText || '').trim();
+      if (stageText) pageTexts.push(stageText);
 
       // Question prompts
       const qSelectors = [
@@ -1242,6 +1242,15 @@
         });
       }
     }
+
+    // Combine every accessible document/frame while removing exact duplicate frame content.
+    const seenPageTexts = new Set();
+    largestStageText = pageTexts.filter(text => {
+      const key = text.replace(/\s+/g, ' ').toLowerCase();
+      if (seenPageTexts.has(key)) return false;
+      seenPageTexts.add(key);
+      return true;
+    }).join('\n\n===== EMBEDDED FRAME =====\n\n');
 
     // 4. Assemble structured question text without ANY artificial character limits
     let assembled = '';
