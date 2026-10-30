@@ -10,7 +10,8 @@
     "tabs",
     "clipboardRead",
     "clipboardWrite",
-    "alarms"
+    "alarms",
+    "sidePanel"
   ],
   "host_permissions": [
     "<all_urls>"
@@ -58,6 +59,16 @@
         "mac": "Alt+Shift+N"
       },
       "description": "Manually advance to the next activity"
+    },
+    "toggle_sidebar": {
+      "suggested_key": {
+        "default": "Alt+Shift+P",
+        "mac": "Alt+Shift+P"
+      },
+      "description": "Open AutoSolve AI in the Chrome side panel"
     }
+  },
+  "side_panel": {
+    "default_path": "popup.html"
   }
 }
