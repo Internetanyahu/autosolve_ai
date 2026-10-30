@@ -88,7 +88,7 @@
   async function remoteFiles(token, extensionSha) {
     const listing = await gh("/git/trees/" + extensionSha + "?recursive=1", token);
     if (listing.truncated) throw new Error("GitHub returned a truncated file list; refusing to update.");
-    return (listing.tree || []).filter(item => item.type === "blob" && item.path !== "README.md" && !item.path.startsWith(".github/")).map(item => ({ path: item.path, sha: item.sha }));
+    return (listing.tree || []).filter(item => item.type === "blob" && item.path !== "README.md" && item.path !== "git-token.txt" && !item.path.startsWith(".github/")).map(item => ({ path: item.path, sha: item.sha }));
   }
   async function downloadBlob(token, sha) {
     const blob = await gh("/git/blobs/" + sha, token);
