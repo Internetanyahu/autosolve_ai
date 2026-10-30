@@ -31,6 +31,23 @@ document.addEventListener('DOMContentLoaded', async () => {
   const btnClear = document.getElementById('btn-clear');
   const btnOptions = document.getElementById('btn-options');
 
+  // Attach Settings immediately so unrelated popup initialization cannot disable it.
+  if (btnOptions) {
+    btnOptions.addEventListener('click', (event) => {
+      event.preventDefault();
+      const optionsUrl = chrome.runtime.getURL('options.html');
+      try {
+        chrome.runtime.openOptionsPage(() => {
+          if (chrome.runtime.lastError) {
+            chrome.tabs.create({ url: optionsUrl });
+          }
+        });
+      } catch (error) {
+        chrome.tabs.create({ url: optionsUrl });
+      }
+    });
+  }
+
   const keyStorageMap = {
     gemini: 'geminiApiKey',
     openai: 'openaiApiKey',
@@ -733,14 +750,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   btnClear.onclick = () => {
     consoleBox.innerHTML = '';
     chrome.storage.local.remove(['recentConsoleLogs']);
-  };
-
-  btnOptions.onclick = () => {
-    if (chrome.runtime.openOptionsPage) {
-      chrome.runtime.openOptionsPage();
-    } else {
-      window.open(chrome.runtime.getURL('options.html'));
-    }
   };
 
   chrome.runtime.onMessage.addListener((req) => {
