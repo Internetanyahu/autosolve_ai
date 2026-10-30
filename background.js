@@ -742,7 +742,7 @@ const AUTOSOLVE_UPDATE_ALARM = 'autosolve-ai-update-check';
 
 function compareExtensionVersions(left, right) {
   const parse = (value) => String(value || '').replace(/^v/i, '').split(/[.+-]/).slice(0, 4).map(part => {
-    const match = part.match(/^\\d+/);
+    const match = part.match(/^\d+/);
     return match ? Number(match[0]) : 0;
   });
   const a = parse(left);
@@ -769,7 +769,7 @@ async function checkForExtensionUpdate() {
   const release = await response.json();
   const latestVersion = String(release.tag_name || '').replace(/^v/i, '');
   const asset = (release.assets || []).find(item =>
-    /^AutoSolveAI-v[^/]+\\.zip$/i.test(item.name) && item.browser_download_url
+    /^AutoSolveAI-v[^/]+\.zip$/i.test(item.name) && item.browser_download_url
   );
   if (!latestVersion || !asset) {
     throw new Error('The latest GitHub release does not contain an AutoSolveAI ZIP asset.');
