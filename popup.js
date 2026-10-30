@@ -529,6 +529,56 @@ document.addEventListener('DOMContentLoaded', async () => {
   const btnAutoCopySolve = document.getElementById('btn-auto-copy-solve');
   const btnGrabPage = document.getElementById('btn-grab-page');
 
+  // Toggle video playback boost on the active tab.
+  const btnVideoBoost = document.getElementById('btn-video-boost');
+  const videoBoostStatus = document.getElementById('video-boost-status');
+  let videoBoostEnabled = false;
+
+  function renderVideoBoostState() {
+    if (!btnVideoBoost) return;
+    btnVideoBoost.textContent = videoBoostEnabled ? 'ON' : 'OFF';
+    btnVideoBoost.setAttribute('aria-pressed', String(videoBoostEnabled));
+    btnVideoBoost.style.background = videoBoostEnabled ? '#047857' : '#334155';
+    btnVideoBoost.style.borderColor = videoBoostEnabled ? '#10b981' : '#475569';
+    if (videoBoostStatus) videoBoostStatus.textContent = videoBoostEnabled
+      ? 'On · videos play at boosted speed'
+      : 'Off · normal playback speed';
+  }
+
+  chrome.storage.local.get(['videoBoostEnabled'], (data) => {
+    videoBoostEnabled = Boolean(data.videoBoostEnabled);
+    renderVideoBoostState();
+  });
+
+  if (btnVideoBoost) {
+    btnVideoBoost.addEventListener('click', async () => {
+      const nextState = !videoBoostEnabled;
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tab?.id) {
+        appendLog('ERROR', 'Could not find the active tab for Video Boost.');
+        return;
+      }
+      const settings = await chrome.storage.sync.get(['videoSpeed']);
+      const speed = Math.min(16, Math.max(1, Number(settings.videoSpeed) || 16));
+      chrome.tabs.sendMessage(tab.id, {
+        action: 'SET_VIDEO_BOOST', enabled: nextState, speed,
+      }, (response) => {
+        if (chrome.runtime.lastError) {
+          appendLog('ERROR', 'Video Boost could not reach this page. Reload the page and try again.');
+          return;
+        }
+        if (!response?.success) {
+          appendLog('ERROR', 'No accessible HTML5 video was found on this page.');
+          return;
+        }
+        videoBoostEnabled = nextState;
+        chrome.storage.local.set({ videoBoostEnabled });
+        renderVideoBoostState();
+        appendLog('VIDEO', nextState ? `Video Boost enabled at ${speed}x.` : 'Video Boost disabled; playback reset to 1x.');
+      });
+    });
+  }
+
   if (btnGrabPage) {
     btnGrabPage.onclick = async () => {
       try {
