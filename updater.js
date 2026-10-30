@@ -175,28 +175,46 @@
 
   // Cheap check (one GitHub request). Never touches local files.
   async function check(token) {
-    const prior = await getUpdaterState();
-    const remoteSha = await remoteExtensionSha(token);
-    let appliedSha = prior.appliedSha;
-    if (!appliedSha) {
-      // First run after a manual install: assume this copy matches main right now.
-      appliedSha = remoteSha;
-      await chrome.storage.local.set({ updaterState: { ...prior, appliedSha } });
-    }
+    // Resolve the local folder first. This is a local IndexedDB lookup and does
+    // not contact GitHub or require a token.
     const handle = await getHandle().catch(() => null);
     let permission = "none";
     if (handle) permission = await handle.queryPermission({ mode: "readwrite" }).catch(() => "prompt");
-    return {
-      currentVersion: chrome.runtime.getManifest().version,
-      remoteSha,
-      appliedSha,
-      updateAvailable: remoteSha !== appliedSha,
-      linked: Boolean(handle),
-      permission,
-      lastApplied: prior.lastApplied || null,
-      checkedAt: new Date().toISOString(),
-      error: null
-    };
+
+    const prior = await getUpdaterState();
+    try {
+      // Public repositories work without an API key. A token is only needed
+      // when GitHub requires authentication (for example, a private repository).
+      const remoteSha = await remoteExtensionSha(token);
+      let appliedSha = prior.appliedSha;
+      if (!appliedSha) {
+        appliedSha = remoteSha;
+        await chrome.storage.local.set({ updaterState: { ...prior, appliedSha } });
+      }
+      return {
+        currentVersion: chrome.runtime.getManifest().version,
+        remoteSha, appliedSha,
+        updateAvailable: remoteSha !== appliedSha,
+        linked: Boolean(handle), permission,
+        lastApplied: prior.lastApplied || null,
+        checkedAt: new Date().toISOString(),
+        githubUrl: "https://github.com/" + REPO,
+        error: null
+      };
+    } catch (error) {
+      const message = error?.message || "GitHub check failed.";
+      const authHint = !token
+        ? " No GitHub token is saved. Public repositories do not need one; if this repository is private, add a fine-grained token with Contents: Read-only access."
+        : "";
+      return {
+        currentVersion: chrome.runtime.getManifest().version,
+        linked: Boolean(handle), permission,
+        lastApplied: prior.lastApplied || null,
+        checkedAt: new Date().toISOString(),
+        githubUrl: "https://github.com/" + REPO,
+        error: message + authHint
+      };
+    }
   }
 
   // Downloads changed files and writes them into the linked folder.
