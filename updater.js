@@ -86,6 +86,28 @@
     const digest = await crypto.subtle.digest("SHA-1", all);
     return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("");
   }
+  function stableJson(value) {
+    if (Array.isArray(value)) return "[" + value.map(stableJson).join(",") + "]";
+    if (value && typeof value === "object") {
+      return "{" + Object.keys(value).sort().map(key => JSON.stringify(key) + ":" + stableJson(value[key])).join(",") + "}";
+    }
+    return JSON.stringify(value);
+  }
+  function manifestsEqualExceptVersion(leftBytes, rightBytes) {
+    try {
+      const left = JSON.parse(new TextDecoder().decode(leftBytes));
+      const right = JSON.parse(new TextDecoder().decode(rightBytes));
+      delete left.version;
+      delete right.version;
+      return stableJson(left) === stableJson(right);
+    } catch { return false; }
+  }
+  function preserveInstalledManifestVersion(remoteBytes, localBytes) {
+    const remote = JSON.parse(new TextDecoder().decode(remoteBytes));
+    const local = JSON.parse(new TextDecoder().decode(localBytes));
+    if (local.version) remote.version = local.version;
+    return new TextEncoder().encode(JSON.stringify(remote, null, 2) + "\n");
+  }
   async function readLocal(root, relativePath) {
     const parts = relativePath.split("/");
     const name = parts.pop();
@@ -183,7 +205,15 @@
     const changed = [];
     for (const file of files) {
       const local = await readLocal(handle, file.path);
-      if (!local || await gitBlobSha(local) !== file.sha) changed.push(file);
+      if (file.path === "manifest.json" && local) {
+        const remoteBytes = await downloadBlob(token, file.sha);
+        if (await gitBlobSha(remoteBytes) !== file.sha) throw new Error("Download of manifest.json failed its integrity check.");
+        if (!manifestsEqualExceptVersion(local, remoteBytes)) {
+          changed.push({ ...file, preloadedBytes: remoteBytes, localManifest: local });
+        }
+      } else if (!local || await gitBlobSha(local) !== file.sha) {
+        changed.push(file);
+      }
     }
     // manifest.json goes last so a failure never leaves it pointing at missing files.
     changed.sort((a, b) => (a.path === "manifest.json") - (b.path === "manifest.json"));
@@ -191,20 +221,26 @@
     // Download and verify everything before writing anything.
     const downloaded = [];
     for (const file of changed) {
-      const bytes = await downloadBlob(token, file.sha);
-      if (await gitBlobSha(bytes) !== file.sha) throw new Error("Download of " + file.path + " failed its integrity check.");
-      downloaded.push({ file, bytes });
+      const sourceBytes = file.preloadedBytes || await downloadBlob(token, file.sha);
+      if (await gitBlobSha(sourceBytes) !== file.sha) throw new Error("Download of " + file.path + " failed its integrity check.");
+      const bytes = file.path === "manifest.json" && file.localManifest
+        ? preserveInstalledManifestVersion(sourceBytes, file.localManifest)
+        : sourceBytes;
+      downloaded.push({ file, bytes, sourceBytes });
     }
     const manifest = downloaded.find(item => item.file.path === "manifest.json");
     if (manifest) {
-      const parsed = JSON.parse(new TextDecoder().decode(manifest.bytes));
+      const parsed = JSON.parse(new TextDecoder().decode(manifest.sourceBytes));
       if (parsed.manifest_version !== 3 || parsed.name !== EXPECTED_NAME) throw new Error("The new manifest.json doesn't look right; refusing to install it.");
     }
 
-    for (const { file, bytes } of downloaded) {
+    for (const { file, bytes, sourceBytes } of downloaded) {
       await writeLocal(handle, file.path, bytes);
       const written = await readLocal(handle, file.path);
-      if (!written || await gitBlobSha(written) !== file.sha) throw new Error("Could not verify " + file.path + " after writing it.");
+      const verified = file.path === "manifest.json"
+        ? written && manifestsEqualExceptVersion(written, sourceBytes)
+        : written && await gitBlobSha(written) === file.sha;
+      if (!verified) throw new Error("Could not verify " + file.path + " after writing it.");
     }
 
     const prior = await getUpdaterState();
