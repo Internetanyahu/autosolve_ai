@@ -42,13 +42,13 @@
 
   // ---- GitHub helpers -----------------------------------------------------------
   async function gh(path, token) {
-    if (!token) throw new Error("Save your GitHub fine-grained token in Full Settings first.");
+    const headers = {
+      "Accept": "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28"
+    };
+    if (token) headers.Authorization = "Bearer " + token;
     const response = await fetch(API + path, {
-      headers: {
-        "Accept": "application/vnd.github+json",
-        "Authorization": "Bearer " + token,
-        "X-GitHub-Api-Version": "2022-11-28"
-      },
+      headers,
       cache: "no-store"
     });
     if (response.status === 401 || response.status === 403) throw new Error("GitHub rejected the saved token (" + response.status + ").");
