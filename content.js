@@ -1,8 +1,30 @@
 // AutoSolve AI passive content helper.
 // Extracts rendered page text/dropdowns, adjusts video playback, and supports explicit manual Next only.
 (() => {
+  // Remove Edgenuity navigation, accessibility help, and page chrome before
+  // copying text to the solver. Keep question wording and answer choices intact.
+  const UI_NOISE_PATTERNS = [
+    /^skip to content$/i,
+    /^skip to next button$/i,
+    /^skip pagination$/i,
+    /^credits$/i,
+    /^pretest$/i,
+    /^mark and return$/i,
+    /^save\s*&\s*exit$/i,
+    /^next$/i,
+    /^previous$/i,
+    /^\d+\s+of\s+\d+$/i,
+    /^en$/i,
+    /^[a-z]{2}[-_][a-z]{2}$/i,
+    /^to highlight with the keyboard:.*remove a highlight:.*$/i,
+  ];
+
   const clean = value => String(value || '')
     .replace(/\u00a0/g, ' ')
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(line => line && !UI_NOISE_PATTERNS.some(pattern => pattern.test(line)))
+    .join('\n')
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
