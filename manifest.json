@@ -12,8 +12,7 @@
     "sidePanel",
     "clipboardRead",
     "clipboardWrite",
-    "alarms",
-    "downloads"
+    "alarms"
   ],
   "host_permissions": [
     "<all_urls>"
@@ -22,8 +21,7 @@
     "default_path": "popup.html"
   },
   "background": {
-    "service_worker": "background.js",
-    "type": "module"
+    "service_worker": "background.js"
   },
   "action": {
     "default_popup": "popup.html",
