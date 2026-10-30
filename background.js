@@ -312,17 +312,19 @@ async function queryGeminiDirectly(base64Image, apiKey, prompt = '') {
   throw lastError || new Error('Gemini request failed.');
 }
 
-// GitHub updater: checks are requested by the updater page, not on every
-// service-worker startup. Concurrent requests share one GitHub check.
+// GitHub updater flow follows PPUSA: one branch-tree check, cached status,
+// optional automatic installation, and a 15-minute background check.
 importScripts("updater.js");
 
 let updateCheckPromise = null;
+let automaticApplyPromise = null;
 
 function checkForExtensionUpdate() {
   if (updateCheckPromise) return updateCheckPromise;
 
   updateCheckPromise = (async () => {
-    const { githubFineGrainedToken } = await chrome.storage.local.get("githubFineGrainedToken");
+    const { githubFineGrainedToken, autoUpdate = true } =
+      await chrome.storage.local.get(["githubFineGrainedToken", "autoUpdate"]);
     let update;
 
     try {
@@ -338,7 +340,13 @@ function checkForExtensionUpdate() {
       };
     }
 
+    update.autoUpdate = autoUpdate;
     await chrome.storage.local.set({ autosolveUpdateStatus: update });
+
+    if (update.updateAvailable && update.linked && update.permission === "granted" &&
+        autoUpdate && !update.error) {
+      await applyExtensionUpdate(false);
+    }
     return update;
   })().finally(() => {
     updateCheckPromise = null;
@@ -347,11 +355,19 @@ function checkForExtensionUpdate() {
   return updateCheckPromise;
 }
 
-async function applyExtensionUpdate() {
-  const { githubFineGrainedToken } = await chrome.storage.local.get("githubFineGrainedToken");
-  const result = await AutoSolveUpdater.apply(githubFineGrainedToken || "", { interactive: true });
-  if (result.ok && result.reload) setTimeout(() => chrome.runtime.reload(), 700);
-  return result;
+async function applyExtensionUpdate(interactive = false) {
+  if (automaticApplyPromise) return automaticApplyPromise;
+
+  automaticApplyPromise = (async () => {
+    const { githubFineGrainedToken } = await chrome.storage.local.get("githubFineGrainedToken");
+    const result = await AutoSolveUpdater.apply(githubFineGrainedToken || "", { interactive });
+    if (result.ok && result.reload) setTimeout(() => chrome.runtime.reload(), 700);
+    return result;
+  })().finally(() => {
+    automaticApplyPromise = null;
+  });
+
+  return automaticApplyPromise;
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -367,9 +383,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.action === "APPLY_EXTENSION_UPDATE") {
-    applyExtensionUpdate()
+    applyExtensionUpdate(true)
       .then(sendResponse)
       .catch(error => sendResponse({ ok: false, error: error?.message || String(error) }));
     return true;
   }
 });
+
+// Match PPUSA's periodic and lifecycle checks. In-flight checks/installations
+// are coalesced above so these triggers cannot create overlapping loops.
+chrome.alarms.create("autosolve-extension-update-check", { periodInMinutes: 15 });
+chrome.alarms.onAlarm.addListener(alarm => {
+  if (alarm.name === "autosolve-extension-update-check") checkForExtensionUpdate();
+});
+chrome.runtime.onInstalled.addListener(() => checkForExtensionUpdate());
+chrome.runtime.onStartup.addListener(() => checkForExtensionUpdate());
