@@ -47,19 +47,36 @@
       "X-GitHub-Api-Version": "2022-11-28"
     };
     if (token) headers.Authorization = "Bearer " + token;
-    const response = await fetch(API + path, {
-      headers,
-      cache: "no-store"
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    let response;
+    try {
+      response = await fetch(API + path, {
+        headers,
+        cache: "no-store",
+        signal: controller.signal
+      });
+    } catch (error) {
+      if (error?.name === "AbortError") throw new Error("GitHub request timed out after 15 seconds.");
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
     if (response.status === 401 || response.status === 403) throw new Error("GitHub rejected the saved token (" + response.status + ").");
     if (response.status === 404) throw new Error("Repository or branch not found (404). Check that the token can read " + REPO + ".");
     if (!response.ok) throw new Error("GitHub request failed (" + response.status + ").");
     return response.json();
   }
   async function remoteExtensionSha(token) {
-    const root = await gh("/git/trees/" + BRANCH, token);
-    if (!root.sha) throw new Error("No repository tree found on " + BRANCH + ".");
-    return root.sha;
+    // Resolve the branch to its commit, then use the commit's tree SHA.
+    // The Git Trees API expects a SHA, not a branch name.
+    const ref = await gh("/git/ref/heads/" + BRANCH, token);
+    const commitSha = ref?.object?.sha;
+    if (!commitSha) throw new Error("Could not resolve branch " + BRANCH + " on GitHub.");
+    const commit = await gh("/git/commits/" + commitSha, token);
+    const treeSha = commit?.tree?.sha;
+    if (!treeSha) throw new Error("No repository tree found on " + BRANCH + ".");
+    return treeSha;
   }
   async function remoteFiles(token, extensionSha) {
     const listing = await gh("/git/trees/" + extensionSha + "?recursive=1", token);
