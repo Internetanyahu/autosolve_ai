@@ -521,7 +521,7 @@ async function queryGeminiDirectly(base64Image, apiKey, prompt = '') {
     });
   }
   parts.push({
-    text: prompt || 'Analyze this screen as an expert in English 4 A & B. Detect the question, choices with exact clickable coordinates pointing to the center of each text box (xPercent, yPercent), identify the academically correct answer(s), handle any drop-down menus, and locate the Next/Submit button.',
+    text: prompt || 'Analyze the supplied image and identify the visible task, relevant text, choices, and interactive elements. Follow the configured system prompt. Do not assume a subject or invent missing information. Return valid JSON.',
   });
 
   const requestBody = {
