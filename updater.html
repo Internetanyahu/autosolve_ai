@@ -33,7 +33,7 @@
     <h1>AutoSolve AI updates</h1>
     <div class="sub" id="version">Loading installed version…</div>
     <section class="card">
-      <p class="note">Link the exact folder you loaded with Chrome's Load unpacked button once. AutoSolve AI will compare its files with GitHub, replace only changed files, verify them, and reload itself. No ZIP downloads.</p>
+      <p class="note">Link the exact folder you loaded with Chrome's Load unpacked button once. Check for updates manually, then choose when to install them. No files are changed automatically.</p>
       <ol class="steps">
         <li>
           <h2>Link the installed extension folder (once)</h2>
@@ -43,7 +43,7 @@
         </li>
         <li>
           <h2>Install updates</h2>
-          <p class="note">Only changed files are downloaded from the repository. Each file is checked against GitHub's SHA before and after writing.</p>
+          <p class="note">Updates are only installed when you click Install update. Each downloaded file is verified before and after writing.</p>
           <div class="row">
             <button id="check" class="ghost">Check now</button>
             <button id="apply" class="green">Install update</button>
@@ -51,7 +51,6 @@
           <div id="updateStatus" class="msg">Checking…</div>
         </li>
       </ol>
-      <label><input type="checkbox" id="autoUpdate" checked> Automatically install updates when available (not during Auto-Pilot)</label>
       <div class="log" id="log">Ready.</div>
     </section>
   </main>
