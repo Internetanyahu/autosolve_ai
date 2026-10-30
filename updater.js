@@ -42,7 +42,7 @@ document.addEventListener('DOMContentLoaded', () => {
         filename: downloadButton.dataset.filename || 'AutoSolveAI-update.zip',
       });
       if (!result?.success) throw new Error(result?.error || 'Download could not be started');
-      status.textContent = 'Download started. Extract the ZIP, then load the extracted folder from chrome://extensions.';
+      status.textContent = 'Download started. Extract the ZIP and replace the files in your existing extension folder, then click Reload at chrome://extensions. Keep the same folder path to preserve saved settings.';
       downloadButton.textContent = 'Download started';
     } catch (error) {
       status.textContent = `Download failed: ${error.message}`;
