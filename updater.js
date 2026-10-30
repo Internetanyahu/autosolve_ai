@@ -1,7 +1,7 @@
 // In-place updater for the unpacked extension.
 //
 // Chrome never auto-updates an unpacked extension, so this script does it
-// directly: it compares the extension/ folder on GitHub's main branch with the
+// directly: it compares the AutoSolve AI repository files on GitHub's main branch with the
 // folder you loaded unpacked, downloads only the files that differ, writes them
 // into that folder (via the File System Access API), and reloads the extension.
 //
@@ -42,7 +42,7 @@
 
   // ---- GitHub helpers -----------------------------------------------------------
   async function gh(path, token) {
-    if (!token) throw new Error("Save your GitHub token first.");
+    if (!token) throw new Error("Save your GitHub fine-grained token in Full Settings first.");
     const response = await fetch(API + path, {
       headers: {
         "Accept": "application/vnd.github+json",
@@ -141,10 +141,10 @@
         if (JSON.parse(await file.text()).name === EXPECTED_NAME) return candidate;
       } catch { /* try next */ }
     }
-    throw new Error("That doesn't look like the PPUSA extension folder. Choose the same folder you used for \"Load unpacked\" (the one containing manifest.json).");
+    throw new Error("That does not look like the AutoSolve AI folder. Choose the same folder you used for \"Load unpacked\" (the one containing manifest.json).");
   }
   async function linkFolder() {
-    if (!self.showDirectoryPicker) throw new Error("This browser can't open a folder picker.");
+    if (!self.showDirectoryPicker) throw new Error("This browser cannot open a folder picker. Use the latest Chrome version.");
     const picked = await self.showDirectoryPicker({ id: "autosolve-ai-extension", mode: "readwrite" });
     const root = await findExtensionRoot(picked);
     await setHandle(root);
