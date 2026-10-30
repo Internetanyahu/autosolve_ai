@@ -367,46 +367,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadKeyForProvider(activeProvider);
   });
 
-  // 3. Pop Out & Side Panel Persistent Sidebar Controls
-  const btnPopout = document.getElementById('btn-popout');
-  const btnSidepanel = document.getElementById('btn-sidepanel');
-
-  function openPopoutWindow() {
-    chrome.windows.create({
-      url: chrome.runtime.getURL('popup.html?popout=true'),
-      type: 'popup',
-      width: 440,
-      height: 740,
-      focused: true,
-    });
-  }
-
-  if (btnPopout) {
-    btnPopout.onclick = () => {
-      openPopoutWindow();
-    };
-  }
-
-  if (btnSidepanel) {
-    btnSidepanel.onclick = () => {
-      if (chrome.sidePanel && chrome.sidePanel.open) {
-        chrome.windows.getCurrent((win) => {
-          chrome.sidePanel.open({ windowId: win.id }).catch(() => {
-            openPopoutWindow();
-          });
-        });
-      } else {
-        openPopoutWindow();
-      }
-    };
-  }
-
-  // Detect popout or sidepanel mode
-  if (window.location.search.includes('popout') || window.innerWidth > 410) {
-    document.body.classList.add('popout-mode');
-  }
-
-  // 4. Text Mode Solver (Passive / Numbered Answers / No Screen Clicks)
+  // Text Mode Solver (passive; page progression is always manual).
   // Retain pasted question text across popup closes
   chrome.storage.local.get(['savedPastedText'], (res) => {
     if (res.savedPastedText && !textQuestionInput.value) {
