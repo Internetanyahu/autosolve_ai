@@ -42,47 +42,22 @@
 
   // ---- GitHub helpers -----------------------------------------------------------
   async function gh(path, token) {
-    const headers = {
-      "Accept": "application/vnd.github+json",
-      "X-GitHub-Api-Version": "2022-11-28"
-    };
-
-    async function request(authToken) {
-      const requestHeaders = { ...headers };
-      if (authToken) requestHeaders.Authorization = "Bearer " + authToken;
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 15000);
-      try {
-        return await fetch(API + path, {
-          headers: requestHeaders,
-          cache: "no-store",
-          signal: controller.signal
-        });
-      } catch (error) {
-        if (error?.name === "AbortError") throw new Error("GitHub request timed out after 15 seconds.");
-        throw error;
-      } finally {
-        clearTimeout(timeout);
-      }
+    if (!token) throw new Error("Save your GitHub token first.");
+    const response = await fetch(API + path, {
+      headers: {
+        "Accept": "application/vnd.github+json",
+        "Authorization": "Bearer " + token,
+        "X-GitHub-Api-Version": "2022-11-28"
+      },
+      cache: "no-store"
+    });
+    if (response.status === 401 || response.status === 403) {
+      throw new Error("GitHub rejected the saved token (" + response.status + ").");
     }
-
-    // Always try the public repository anonymously first. Only retry with the
-    // saved token when GitHub says authentication/access may be required.
-    let response = await request("");
-    if ([401, 403, 404].includes(response.status) && token) {
-      response = await request(token);
+    if (response.status === 404) {
+      throw new Error("Repository or branch not found (404). Check that the token can read " + REPO + ".");
     }
-
-    if (!response.ok) {
-      if ([401, 403, 404].includes(response.status)) {
-        throw new Error(
-          response.status === 404
-            ? "GitHub could not find this repository or branch. It may be private; verify the repository URL and saved token."
-            : "GitHub denied access (" + response.status + "). Check the saved token's repository access."
-        );
-      }
-      throw new Error("GitHub request failed (" + response.status + ").");
-    }
+    if (!response.ok) throw new Error("GitHub request failed (" + response.status + ").");
     return response.json();
   }
   async function remoteExtensionSha(token) {
