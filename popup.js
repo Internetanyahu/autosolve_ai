@@ -661,14 +661,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Get current provider key
     chrome.storage.sync.get([storageKey, 'customBaseUrl', 'customModel'], async (store) => {
       const apiKey = store[storageKey] || '';
-      const imageBase64 = null;
 
       // Send to background service worker for processing
       chrome.runtime.sendMessage(
         {
           action: 'TRIGGER_TEXT_SOLVE',
           text,
-          imageBase64,
           provider,
           apiKey,
           model: store.customModel || '',
