@@ -17,7 +17,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   const btnSolveText = document.getElementById('btn-solve-text');
   const btnPasteClipboard = document.getElementById('btn-paste-clipboard');
   const btnClearText = document.getElementById('btn-clear-text');
-  const chkManualScreenshot = document.getElementById('chk-manual-screenshot');
 
   // Vision Mode controls
   const btnScan = document.getElementById('btn-scan');
@@ -88,7 +87,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         })
         .join('');
     } else {
-      itemsHtml = `<div class="big-answer-main">👉 [1] (A) "audience and purpose"</div>`;
+      itemsHtml = `<div class="big-answer-main">No answer was returned by the API.</div>`;
     }
 
     let dropdownsHtml = '';
@@ -153,152 +152,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Load and retain console logs when user re-opens popup
   loadSavedLogs();
 
-  function normalizeAndExtractAnswers(result, rawInputText = '') {
-    if (!result || typeof result !== 'object') {
-      result = {};
-    }
+  function normalizeAndExtractAnswers(result) {
+    if (!result || typeof result !== 'object') result = {};
     if (!Array.isArray(result.answers)) result.answers = [];
     if (!Array.isArray(result.allChoices)) result.allChoices = [];
     if (!Array.isArray(result.dropdowns)) result.dropdowns = [];
-
-    const fullContext = `${rawInputText} ${result.question || ''} ${result.conciseReasoning || ''}`.toLowerCase();
-
-    // Canonical check 1: Jonathan Swift "A Modest Proposal" / False Premise
-    if (
-      fullContext.includes('false premise') ||
-      (fullContext.includes('modest proposal') && (fullContext.includes('breed') || fullContext.includes('squire'))) ||
-      fullContext.includes('breed children to sell')
-    ) {
-      result.question = result.question || 'On which false premise does this excerpt rely?';
-      result.answers = [
-        {
-          number: 2,
-          letter: 'B',
-          text: 'that a woman would be willing to breed children to sell',
-          isCorrect: true,
-          confidence: 0.99,
-        },
-      ];
-      result.allChoices = [
-        { number: 1, letter: 'A', text: 'that a woman would be willing to keep the children she bears', isCorrect: false },
-        { number: 2, letter: 'B', text: 'that a woman would be willing to breed children to sell', isCorrect: true },
-        { number: 3, letter: 'C', text: 'that a woman would be willing to pay her landlord rent', isCorrect: false },
-        { number: 4, letter: 'D', text: 'that a woman would be willing to take over her landlord’s business', isCorrect: false },
-      ];
-      return result;
-    }
-
-    // 1. If answers already provided, guarantee accurate 1-based number and letter
-    if (result.answers.length > 0) {
-      result.answers = result.answers.map((ans, idx) => {
-        let num = typeof ans.number === 'number' && ans.number > 0 ? ans.number : null;
-        let letter = ans.letter || null;
-
-        // Try matching against allChoices
-        if (result.allChoices.length > 0) {
-          const cIdx = result.allChoices.findIndex(
-            (c) =>
-              (c.text && ans.text && (c.text.trim().toLowerCase() === ans.text.trim().toLowerCase() || c.text.toLowerCase().includes(ans.text.toLowerCase()) || ans.text.toLowerCase().includes(c.text.toLowerCase()))) ||
-              (c.number && c.number === num) ||
-              (c.letter && String(c.letter).toUpperCase() === String(letter).toUpperCase())
-          );
-          if (cIdx !== -1) {
-            num = result.allChoices[cIdx].number || (cIdx + 1);
-            letter = result.allChoices[cIdx].letter || String.fromCharCode(65 + cIdx);
-          }
-        }
-
-        if (!num && letter) {
-          const code = letter.toUpperCase().charCodeAt(0);
-          if (code >= 65 && code <= 90) num = code - 64;
-        }
-        if (!num) num = idx + 1;
-        if (!letter) letter = String.fromCharCode(64 + num);
-
-        return {
-          number: num,
-          letter,
-          text: String(ans.text || ''),
-          isCorrect: true,
-          confidence: typeof ans.confidence === 'number' ? ans.confidence : 0.98,
-        };
-      });
-      return result;
-    }
-
-    // 2. Check if allChoices has items marked isCorrect
-    const correctInChoices = result.allChoices.filter((c) => c.isCorrect);
-    if (correctInChoices.length > 0) {
-      result.answers = correctInChoices.map((c, idx) => ({
-        number: typeof c.number === 'number' ? c.number : idx + 1,
-        letter: c.letter || String.fromCharCode(64 + (typeof c.number === 'number' ? c.number : idx + 1)),
-        text: String(c.text || ''),
+    if (result.answers.length) {
+      result.answers = result.answers.map((answer, index) => ({
+        ...answer,
+        number: Number.isInteger(answer.number) && answer.number > 0 ? answer.number : index + 1,
+        letter: answer.letter || String.fromCharCode(65 + index),
+        text: String(answer.text || ''),
         isCorrect: true,
-        confidence: 0.98,
       }));
-      return result;
     }
-
-    // 3. If allChoices has options, check which is mentioned in conciseReasoning
-    const reasoning = (result.conciseReasoning || '').toLowerCase();
-    for (let cIdx = 0; cIdx < result.allChoices.length; cIdx++) {
-      const choice = result.allChoices[cIdx];
-      if (choice.text && reasoning.includes(choice.text.toLowerCase())) {
-        choice.isCorrect = true;
-        const num = typeof choice.number === 'number' ? choice.number : cIdx + 1;
-        const letter = choice.letter || String.fromCharCode(64 + num);
-        result.answers.push({
-          number: num,
-          letter,
-          text: choice.text,
-          isCorrect: true,
-          confidence: 0.96,
-        });
-        return result;
-      }
-    }
-
-    // Canonical check 2: Queen Elizabeth Tilbury/Parliament English 4
-    let extractedAnswer = '';
-    if (fullContext.includes('tilbury') || fullContext.includes('parliament') || fullContext.includes('elizabeth')) {
-      if (fullContext.includes('audience and purpose') || fullContext.includes('differences in')) {
-        extractedAnswer = 'audience and purpose';
-      }
-    }
-
-    if (!extractedAnswer && result.conciseReasoning) {
-      const match = result.conciseReasoning.match(/(?:differences in|therefore|answer is|correct answer is|concludes)\s+["']?([^"'.\n,]+(?:\s+and\s+[^"'.\n,]+)?)["']?/i);
-      if (match && match[1]?.trim().length > 2) {
-        extractedAnswer = match[1].trim();
-      } else {
-        const firstSentence = result.conciseReasoning.split(/[.!?]/)[0] || '';
-        extractedAnswer = firstSentence.slice(0, 60).trim();
-      }
-    }
-
-    if (!extractedAnswer) {
-      extractedAnswer = 'audience and purpose';
-    }
-
-    result.answers = [
-      {
-        number: 1,
-        letter: 'A',
-        text: extractedAnswer,
-        isCorrect: true,
-        confidence: 0.99,
-      },
-    ];
-
-    if (result.allChoices.length === 0) {
-      result.allChoices = [
-        { number: 1, letter: 'A', text: extractedAnswer, isCorrect: true },
-        { number: 2, letter: 'B', text: 'setting and culture', isCorrect: false },
-        { number: 3, letter: 'C', text: 'length and style', isCorrect: false },
-        { number: 4, letter: 'D', text: 'tone and meter', isCorrect: false },
-      ];
-    }
-
     return result;
   }
 
@@ -660,33 +527,43 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Helper to extract content directly from active tab
   async function grabContentFromActiveTab() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab || !tab.id) {
-      throw new Error('No active browser tab found.');
+    if (!tab?.id) throw new Error('No active browser tab found.');
+    if (/^(chrome|edge|about):/i.test(tab.url || '')) throw new Error('This browser page does not allow page extraction.');
+
+    const frames = await chrome.scripting.executeScript({
+      target: { tabId: tab.id, allFrames: true },
+      func: () => {
+        const clean = value => String(value || '').replace(/\u00a0/g, ' ').replace(/[ \t]+\n/g, '\n').trim();
+        const selection = clean(window.getSelection?.()?.toString());
+        if (selection.length > 8) return { text: selection };
+        if (!document.body) return { text: '' };
+        const clone = document.body.cloneNode(true);
+        clone.querySelectorAll('script, style, noscript, template, svg, [aria-hidden="true"]').forEach(el => el.remove());
+        clone.querySelectorAll('input, textarea, select').forEach(el => {
+          const label = el.labels?.[0]?.innerText || el.getAttribute('aria-label') || el.getAttribute('name') || '';
+          const value = el.value || el.getAttribute('placeholder') || '';
+          const replacement = document.createElement('div');
+          replacement.textContent = [label, value].filter(Boolean).join(': ');
+          el.replaceWith(replacement);
+        });
+        return { text: clean(clone.innerText || clone.textContent) };
+      },
+    });
+
+    const seen = new Set();
+    const chunks = [];
+    for (const frame of frames || []) {
+      const text = String(frame.result?.text || '').trim();
+      if (text.length < 2) continue;
+      const key = text.replace(/\s+/g, ' ').toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      chunks.push(text);
     }
-    try {
-      await chrome.scripting.executeScript({
-        target: { tabId: tab.id, allFrames: false },
-        files: ['content.js'],
-      });
-    } catch {}
-
-    const res = await new Promise((resolve) => {
-      chrome.tabs.sendMessage(tab.id, { action: 'GRAB_PAGE_CONTENT' }, (response) => {
-        if (chrome.runtime.lastError) {
-          resolve(null);
-        } else {
-          resolve(response);
-        }
-      });
-    });
-
-    if (res && res.text) return res.text;
-
-    const scriptResults = await chrome.scripting.executeScript({
-      target: { tabId: tab.id, allFrames: false },
-      func: () => (window.__AUTOSOLVE_GRAB_CONTENT__ ? window.__AUTOSOLVE_GRAB_CONTENT__().text : document.body.innerText),
-    });
-    return scriptResults[0]?.result || '';
+    if (!chunks.length) throw new Error('No readable text found in the page or its accessible frames.');
+    const combined = chunks.join('\n\n===== EMBEDDED FRAME =====\n\n');
+    appendLog('INFO', 'Extracted ' + chunks.length + ' frame(s), ' + combined.length.toLocaleString() + ' characters.');
+    return combined;
   }
 
   // 1-Click Auto-Copy & Solve Page Workflow
@@ -748,7 +625,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const provider = selectAiProvider.value;
     const storageKey = keyStorageMap[provider] || 'geminiApiKey';
 
-    if (!text && !chkManualScreenshot.checked) {
+    if (!text) {
       appendLog('ERROR', 'Please paste question text or click "⚡ Auto-Copy Page & Solve".');
       return;
     }
@@ -760,19 +637,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Get current provider key
     chrome.storage.sync.get([storageKey, 'customBaseUrl', 'customModel'], async (store) => {
       const apiKey = store[storageKey] || '';
-      let imageBase64 = null;
-
-      if (chkManualScreenshot.checked) {
-        try {
-          const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-          if (activeTab?.windowId) {
-            appendLog('INFO', 'Capturing manual tab screenshot for speed/context...');
-            imageBase64 = await chrome.tabs.captureVisibleTab(activeTab.windowId, { format: 'png' });
-          }
-        } catch (e) {
-          appendLog('ERROR', `Screenshot capture note: ${e.message}`);
-        }
-      }
+      const imageBase64 = null;
 
       // Send to background service worker for processing
       chrome.runtime.sendMessage(
