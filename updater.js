@@ -232,3 +232,78 @@
     }
   }
 
+  // Downloads changed files and writes them into the linked folder.
+  // The caller reloads the extension when result.reload is true.
+  async function apply(token, { interactive = false } = {}) {
+    if (!navigator.locks) return runApply(token, interactive);
+    return navigator.locks.request("autosolve-ai-extension-update", { ifAvailable: true }, async lock => {
+      if (!lock) return { ok: false, busy: true, error: "Another update is already running." };
+      return runApply(token, interactive);
+    });
+  }
+  async function runApply(token, interactive) {
+    const handle = await getHandle();
+    if (!handle) return { ok: false, needsLink: true, error: "The extension folder isn't linked yet." };
+    let permission = await handle.queryPermission({ mode: "readwrite" });
+    if (permission !== "granted" && interactive) permission = await handle.requestPermission({ mode: "readwrite" });
+    if (permission !== "granted") return { ok: false, needsPermission: true, error: "Folder access needs to be granted again." };
+
+    const remoteSha = await remoteExtensionSha(token);
+    const files = await remoteFiles(token, remoteSha);
+    if (!files.some(file => file.path === "manifest.json")) throw new Error("The remote extension folder has no manifest.json; refusing to update.");
+
+    const changed = [];
+    for (const file of files) {
+      const local = await readLocal(handle, file.path);
+      if (file.path === "manifest.json" && local) {
+        const remoteBytes = await downloadBlob(token, file.sha);
+        if (await gitBlobSha(remoteBytes) !== file.sha) throw new Error("Download of manifest.json failed its integrity check.");
+        if (!manifestsEqualExceptVersion(local, remoteBytes)) {
+          changed.push({ ...file, preloadedBytes: remoteBytes, localManifest: local });
+        }
+      } else if (!local || await gitBlobSha(local) !== file.sha) {
+        changed.push(file);
+      }
+    }
+    // manifest.json goes last so a failure never leaves it pointing at missing files.
+    changed.sort((a, b) => (a.path === "manifest.json") - (b.path === "manifest.json"));
+
+    // Download and verify everything before writing anything.
+    const downloaded = [];
+    for (const file of changed) {
+      const sourceBytes = file.preloadedBytes || await downloadBlob(token, file.sha);
+      if (await gitBlobSha(sourceBytes) !== file.sha) throw new Error("Download of " + file.path + " failed its integrity check.");
+      const bytes = file.path === "manifest.json" && file.localManifest
+        ? preserveInstalledManifestVersion(sourceBytes, file.localManifest)
+        : sourceBytes;
+      downloaded.push({ file, bytes, sourceBytes });
+    }
+    const manifest = downloaded.find(item => item.file.path === "manifest.json");
+    if (manifest) {
+      const parsed = JSON.parse(new TextDecoder().decode(manifest.sourceBytes));
+      if (parsed.manifest_version !== 3 || parsed.name !== EXPECTED_NAME) throw new Error("The new manifest.json doesn't look right; refusing to install it.");
+    }
+
+    for (const { file, bytes, sourceBytes } of downloaded) {
+      await writeLocal(handle, file.path, bytes);
+      const written = await readLocal(handle, file.path);
+      const verified = file.path === "manifest.json"
+        ? written && manifestsEqualExceptVersion(written, sourceBytes)
+        : written && await gitBlobSha(written) === file.sha;
+      if (!verified) throw new Error("Could not verify " + file.path + " after writing it.");
+    }
+
+    const prior = await getUpdaterState();
+    await chrome.storage.local.set({
+      updaterState: {
+        ...prior,
+        appliedSha: remoteSha,
+        lastApplied: new Date().toISOString(),
+        lastAppliedFiles: changed.map(file => file.path)
+      }
+    });
+    return { ok: true, changed: changed.map(file => file.path), reload: changed.length > 0 };
+  }
+
+  self.AutoSolveUpdater = { check, apply, linkFolder, getHandle, clearHandle };
+})();
