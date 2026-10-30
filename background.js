@@ -257,7 +257,19 @@ async function getCustomPrompt() {
   return '';
 }
 
+async function openAutoSolveSidePanel() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.windowId) throw new Error('No active browser window found.');
+    await chrome.sidePanel.open({ windowId: tab.windowId });
+    logEvent('ACTION', 'Opened AutoSolve AI in the Chrome side panel.');
+  } catch (error) {
+    logEvent('ERROR', 'Could not open Chrome side panel: ' + error.message);
+  }
+}
+
 chrome.commands.onCommand.addListener(command => {
+  if (command === 'toggle_sidebar') openAutoSolveSidePanel();
   if (command === 'auto_copy_solve') handleAutoCopyAndSolve();
   if (command === 'manual_next') chrome.tabs.query({active:true,currentWindow:true}, async tabs => {
     const tabId=tabs[0]?.id;
