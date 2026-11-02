@@ -1,28 +1,26 @@
 # AutoSolve AI
 
-Chrome extension that answers page questions using a configured AI provider.
+Text-first Chrome extension that extracts visible webpage text, sends the full question set to the configured AI provider, and returns numbered answers in page order. Page progression remains manual.
 
-## Automatic GitHub updates
+## Setup
 
-Every commit pushed to `main` triggers GitHub Actions to build a versioned extension ZIP and publish it as a GitHub Release. The extension checks for releases when it starts, when its popup opens, and every six hours while Chrome is running.
+1. Open the repository and download the extension files, or use the repository's current release package.
+2. Extract the extension folder.
+3. Open `chrome://extensions` and enable **Developer mode**.
+4. Select **Load unpacked** and choose the extension folder.
+5. Open **Full Settings**, select an AI provider, enter its API key, and save.
 
-When an update is available, open the extension popup and choose **Download update**. The ZIP is saved through Chrome's download manager.
+## Updating
 
-### First-time setup of the updater
+The built-in updater checks the repository's current branch through jsDelivr rather than relying on GitHub's anonymous REST API rate limit. Open the updater page from the extension to link the exact folder loaded in Chrome and configure update access. Keep that folder in the same location.
 
-The updater is included in the release ZIP. If you are using an older copy of the extension, download the current release once and install it manually:
+After an update is installed, reload AutoSolve AI at `chrome://extensions` if Chrome does not reload it automatically. The updater does not replace the folder selected in Chrome with a new folder.
 
-1. Download the ZIP from [GitHub Releases](https://github.com/SK64HD/autosolve_ai/releases/latest).
-2. Extract it in the ChromeOS Files app.
-3. Open `chrome://extensions`, enable Developer mode, and use **Load unpacked** to select the extracted extension folder.
+## Solving
 
-### Applying later updates
+- Paste question text or use **Auto-Copy Page & Solve**.
+- AutoSolve reads the full supplied text and returns answers in page order.
+- It does not click answer choices or automatically advance the page.
+- The editable instructions in Full Settings are added to the built-in solving instructions; they do not replace the core JSON/output requirements.
 
-1. Download the update from the extension popup.
-2. Extract the ZIP to a temporary folder.
-3. Copy the extracted files into the **same folder** you originally loaded as an unpacked extension, replacing the older files.
-4. Open `chrome://extensions` and click **Reload** on AutoSolve AI.
-
-Keep the original extension folder path unchanged. Chrome ties unpacked-extension storage to its identity, and changing the folder can cause saved API keys and preferences to appear missing. The ZIP does not contain your API keys or settings.
-
-An unpacked extension cannot replace its own installed files or silently reload itself. The updater automates release detection and downloading; the final file replacement and reload remain manual.
+API keys and preferences are stored in the browser's extension storage and are not included in repository files.
