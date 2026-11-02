@@ -1,6 +1,0 @@
-{
-  "name": "AutoSolve AI - Vision Q&A & Extension Hub",
-  "description": "Multimodal AI screen solver with automated answer coordinate detection, natural mouse click simulation, and 16x video acceleration.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}

@@ -169,71 +169,133 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
  
 // Text Mode Q&A Handler.
  // Strictly passive: No screen interactions, no mouse clicks.
+// Text Mode Q&A Handler — direct provider requests; no hosted backend.
 async function handleTextSolve(req) {
-  const { text, provider = 'gemini', apiKey, model, baseUrl } = req;
-  logEvent('ACTION', `[TEXT MODE] Solving question using ${provider.toUpperCase()}...`);
-  logEvent('INFO', '[DIAGNOSTIC] TRIGGER_TEXT_SOLVE received. Input characters: ' + String(text || '').length);
+  const text = String(req.text || '');
+  const provider = String(req.provider || 'gemini').toLowerCase();
+  const apiKey = String(req.apiKey || '').trim();
+  const model = String(req.model || '').trim();
+  const baseUrl = String(req.baseUrl || '').trim();
 
-  let backendFailureMessage = '';
+  if (!text.trim()) throw new Error('Enter or capture page text before solving.');
+  if (!apiKey) throw new Error(`A ${provider.toUpperCase()} API key is required. Add it in Settings.`);
+  if (text.length > 500000) throw new Error('Page text exceeds the 500,000-character limit.');
 
-  // Match the older working backend contract: allow the server to finish and
-  // send the editable prompt as userPrompt (the field its route accepts).
-  try {
-    const serverUrl = await getServerUrl();
-    const userPrompt = await getCustomPrompt();
-    const backendStartedAt = Date.now();
-    logEvent('INFO', '[TEXT MODE] Sending request to backend using the legacy solve-text contract...');
-    const res = await fetch(`${serverUrl}/api/solve-text`, {
+  logEvent('ACTION', `[TEXT MODE] Sending page text directly to ${provider.toUpperCase()} (no hosted backend)...`);
+  logEvent('INFO', `[DIAGNOSTIC] Direct provider request. Input characters: ${text.length}`);
+
+  const userPrompt = await getCustomPrompt();
+  const promptContent = `User Question / Content:
+${text}
+
+${userPrompt ? `User Custom Instructions:
+${userPrompt}
+
+` : ''}Answer every supplied question in order. Follow the user's requested output format.`;
+
+  // The system prompt deliberately accepts plain text. JSON is parsed when a
+  // provider returns it, but a valid non-JSON answer is never rejected.
+  const systemPrompt = AUTOSOLVE_SYSTEM_PROMPT;
+
+  const configs = {
+    gemini: { model: 'gemini-3.8-flash' },
+    openai: { model: 'gpt-4o-mini', baseUrl: 'https://api.openai.com/v1' },
+    anthropic: { model: 'claude-3-5-haiku-20241022' },
+    claude: { model: 'claude-3-5-haiku-20241022' },
+    deepseek: { model: 'deepseek-chat', baseUrl: 'https://api.deepseek.com' },
+    custom: { model: model || 'openai/gpt-4o-mini', baseUrl: baseUrl || 'https://openrouter.ai/api/v1' },
+  };
+  const config = configs[provider];
+  if (!config) throw new Error(`Unsupported AI provider: ${provider}`);
+  const selectedModel = model || config.model;
+  let rawOutput = '';
+  let response;
+
+  if (provider === 'gemini') {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(selectedModel)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+    response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      signal: AbortSignal.timeout(185_000),
-      body: JSON.stringify({ text, provider, apiKey, model, baseUrl, userPrompt }),
+      signal: AbortSignal.timeout(185000),
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: systemPrompt }] },
+        contents: [{ role: 'user', parts: [{ text: promptContent }] }],
+        generationConfig: { temperature: 0.1, maxOutputTokens: 8192 },
+      }),
     });
-
-    const responseText = await res.text();
-    logEvent('INFO', '[TEXT MODE] Backend responded with HTTP ' + res.status + ' in ' + (Date.now() - backendStartedAt) + 'ms.');
+    const body = await response.text();
     let data = {};
-    try { data = responseText ? JSON.parse(responseText) : {}; }
-    catch { data = { error: responseText.slice(0, 1000) }; }
-
-    let backendResult = data.result || data.solution;
-    if (typeof backendResult === 'string') {
-      // Older backend builds sometimes return the model payload as text.
-      // Recover JSON when possible; otherwise preserve the text for display.
-      backendResult = parseGeminiJson(backendResult);
+    try { data = body ? JSON.parse(body) : {}; } catch {}
+    if (!response.ok) throw new Error(`Gemini API HTTP ${response.status} (${selectedModel}): ${data.error?.message || body.slice(0, 700) || 'Request failed'}`);
+    rawOutput = data.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('').trim() || '';
+    if (!rawOutput) {
+      const reason = data.promptFeedback?.blockReason || data.candidates?.[0]?.finishReason || 'No response text';
+      throw new Error(`Gemini returned no answer text: ${reason}`);
     }
-    if (res.ok && data.success && backendResult && typeof backendResult === 'object') {
-      const result = normalizeAndExtractAnswers(backendResult, text);
-      if (!result.answers.length && !result.rawText && result.conciseReasoning) {
-        result.rawText = String(result.conciseReasoning);
-      }
-      logEvent('COMPLETE', `[TEXT MODE] Solved via ${provider.toUpperCase()} (${result.model || data.meta?.model || ''})`);
-      if (result.answers.length) {
-        result.answers.forEach(ans => {
-          logEvent('CLICK', `ANSWER [${ans.number}] (${ans.letter}) "${ans.text}"`);
-        });
-      }
-      if (result.dropdowns.length) {
-        result.dropdowns.forEach((dd, idx) => {
-          logEvent('CLICK', `DROPDOWN [${dd.menuNumber || idx + 1}]: Pick [${dd.selectedNumber || 1}] "${dd.selectedAnswer || ''}"`);
-        });
-      }
-      if (result.conciseReasoning) logEvent('REASONING', result.conciseReasoning);
-      return { success: true, result };
-    }
-
-    const backendMessage = data?.error || data?.message || 'Backend did not return a usable result.';
-    backendFailureMessage = backendMessage;
-    logEvent('ERROR', '[TEXT MODE] Backend solve failed. HTTP ' + res.status + ': ' + backendMessage);
-  } catch (backendErr) {
-    backendFailureMessage = backendErr?.message || String(backendErr);
-    logEvent('ERROR', '[TEXT MODE] Backend request failed. No direct provider fallback will be attempted. ' + backendFailureMessage);
+  } else if (provider === 'anthropic' || provider === 'claude') {
+    response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      signal: AbortSignal.timeout(185000),
+      body: JSON.stringify({
+        model: selectedModel,
+        max_tokens: 8192,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: promptContent }],
+        temperature: 0.1,
+      }),
+    });
+    const body = await response.text();
+    let data = {};
+    try { data = body ? JSON.parse(body) : {}; } catch {}
+    if (!response.ok) throw new Error(`Anthropic API HTTP ${response.status}: ${data.error?.message || body.slice(0, 700) || 'Request failed'}`);
+    rawOutput = Array.isArray(data.content) ? data.content.map(part => part.text || '').join('').trim() : '';
+  } else {
+    const endpoint = (config.baseUrl || baseUrl || '').replace(/\/+$/, '');
+    if (!endpoint || !/^https:\/\//i.test(endpoint)) throw new Error('The custom provider endpoint must be a valid HTTPS URL.');
+    response = await fetch(`${endpoint}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(185000),
+      body: JSON.stringify({
+        model: selectedModel,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: promptContent },
+        ],
+        temperature: 0.1,
+      }),
+    });
+    const body = await response.text();
+    let data = {};
+    try { data = body ? JSON.parse(body) : {}; } catch {}
+    if (!response.ok) throw new Error(`${provider.toUpperCase()} API HTTP ${response.status}: ${data.error?.message || body.slice(0, 700) || 'Request failed'}`);
+    const content = data.choices?.[0]?.message?.content;
+    rawOutput = typeof content === 'string' ? content.trim() :
+      Array.isArray(content) ? content.map(part => part?.text || '').join('').trim() : '';
   }
 
-  // Do not automatically call Gemini directly after a backend failure.
-  // The backend is the configured model router; direct retries can consume
-  // the user's separate Google AI Studio daily quota.
-  throw new Error(`Backend solve failed. No direct provider retry was made to protect your API quota. ${backendFailureMessage || 'Check the backend connection and response format.'}`);
+  if (!rawOutput) throw new Error(`${provider.toUpperCase()} returned an empty response.`);
+  let parsed = parseGeminiJson(rawOutput);
+  if (parsed.parseWarning) parsed = { rawText: rawOutput, answers: [], allChoices: [], dropdowns: [] };
+  const result = normalizeAndExtractAnswers(parsed, text);
+  if (!result.answers.length && !result.rawText) result.rawText = rawOutput;
+  result.provider = provider === 'claude' ? 'anthropic' : provider;
+  result.model = selectedModel;
+
+  logEvent('COMPLETE', `[TEXT MODE] Solved directly with ${result.provider.toUpperCase()} (${selectedModel})`);
+  if (result.answers.length) {
+    result.answers.forEach(answer => logEvent('ANSWER', `[TEXT MODE] Question [${answer.number}]: ${answer.text}`));
+  } else {
+    logEvent('INFO', '[TEXT MODE] Provider response preserved as text; no structured answer array was detected.');
+  }
+  if (result.conciseReasoning) logEvent('REASONING', result.conciseReasoning);
+  return { success: true, result };
 }
 
 async function handleAutoCopyAndSolve() {
