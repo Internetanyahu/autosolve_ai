@@ -97,7 +97,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // BIG GREEN ANSWER BANNER (Prominent, High-Visibility, End of Solution)
-  function renderBigGreenAnswer(answers, dropdowns = [], saveToStorage = true) {
+  function renderBigGreenAnswer(answers, dropdowns = [], saveToStorage = true, rawText = '') {
     const box = document.createElement('div');
     box.className = 'big-answer-box';
 
@@ -120,6 +120,11 @@ document.addEventListener('DOMContentLoaded', async () => {
           return `${question}${analysis}${finalAnswer}`;
         })
         .join('');
+    } else if (rawText) {
+      const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+      })[char]);
+      itemsHtml = `<div class="big-answer-main" style="white-space:pre-wrap">${escapeHtml(rawText)}</div>`;
     } else {
       itemsHtml = `<div class="big-answer-main">No answer was returned by the API.</div>`;
     }
@@ -153,6 +158,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             level: 'BIG_ANSWER',
             answers,
             dropdowns,
+            rawText,
             time: new Date().toLocaleTimeString(),
             message: `CORRECT ANSWER: ${answers.map((a) => `[${a.number}] (${a.letter || ''}) "${a.text}"`).join(', ')}`,
           });
@@ -170,7 +176,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         consoleBox.innerHTML = '';
         logs.forEach((item) => {
           if (item.level === 'BIG_ANSWER' && Array.isArray(item.answers)) {
-            renderBigGreenAnswer(item.answers, item.dropdowns || [], false);
+            renderBigGreenAnswer(item.answers, item.dropdowns || [], false, item.rawText || '');
           } else {
             const d = document.createElement('div');
             d.className = `log-item log-${item.level || 'INFO'}`;
@@ -765,7 +771,7 @@ document.addEventListener('DOMContentLoaded', async () => {
               appendLog('REASONING', `Reasoning: ${result.conciseReasoning}`);
             }
 
-            renderBigGreenAnswer(result.answers, result.dropdowns || []);
+            renderBigGreenAnswer(result.answers, result.dropdowns || [], true, result.rawText || '');
           }
         );
       } catch (error) {
