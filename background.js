@@ -323,27 +323,36 @@ chrome.commands.onCommand.addListener(command => {
 });
 
 function parseGeminiJson(raw) {
-  const source = String(raw || '').replace(/^\uFEFF/, '').trim();
-  if (!source) throw new Error('Gemini returned an empty response.');
+  const source = String(raw || '').replace(/^\\uFEFF/, '').trim();
+  if (!source) {
+    return { conciseReasoning: 'Gemini returned an empty response.', answers: [], allChoices: [], dropdowns: [] };
+  }
 
-  const candidates = [source.replace(/^\s*```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim()];
-  const text = candidates[0];
-  const start = text.indexOf('{');
+  // Match the old server's recovery order: direct JSON, fenced JSON, then
+  // the first complete JSON object embedded in surrounding text.
+  const candidates = [source];
+  const fenced = source.match(/```(?:json)?\\s*([\\s\\S]*?)\\s*```/i);
+  if (fenced?.[1]) candidates.push(fenced[1].trim());
+
+  const start = source.indexOf('{');
   if (start !== -1) {
     let depth = 0;
     let inString = false;
     let escaped = false;
-    for (let i = start; i < text.length; i++) {
-      const ch = text[i];
+    for (let i = start; i < source.length; i++) {
+      const ch = source[i];
       if (inString) {
         if (escaped) escaped = false;
-        else if (ch === '\\') escaped = true;
+        else if (ch === '\\\\') escaped = true;
         else if (ch === '"') inString = false;
       } else if (ch === '"') inString = true;
       else if (ch === '{') depth++;
-      else if (ch === '}' && --depth === 0) {
-        candidates.push(text.slice(start, i + 1));
-        break;
+      else if (ch === '}') {
+        depth--;
+        if (depth === 0) {
+          candidates.push(source.slice(start, i + 1));
+          break;
+        }
       }
     }
   }
@@ -351,11 +360,22 @@ function parseGeminiJson(raw) {
   for (const candidate of candidates) {
     try {
       const parsed = JSON.parse(candidate);
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
-      if (Array.isArray(parsed)) return { answers: parsed };
+      if (Array.isArray(parsed)) return { answers: parsed, allChoices: [], dropdowns: [] };
+      if (parsed && typeof parsed === 'object') return parsed;
     } catch {}
   }
-  throw new Error('Gemini returned a response that could not be recovered as JSON. Excerpt: ' + source.slice(0, 300));
+
+  // The legacy server preserved non-JSON model output as reasoning instead
+  // of failing the entire solve. Keep that recovery, but never invent answers.
+  return {
+    question: '',
+    questionType: 'other',
+    conciseReasoning: source,
+    answers: [],
+    allChoices: [],
+    dropdowns: [],
+    parseWarning: 'The model response was not structured JSON; raw text was preserved.',
+  };
 }
 
 const AUTOSOLVE_SYSTEM_PROMPT = `You are AutoSolve AI in Text Mode, a general-purpose question and assessment solver.
