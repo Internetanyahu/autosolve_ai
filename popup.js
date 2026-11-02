@@ -685,7 +685,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   btnSolveText.onclick = async () => {
-    const text = removeAccessibilityCredits(textQuestionInput.value);\n    textQuestionInput.value = text;
+    const text = removeAccessibilityCredits(textQuestionInput.value);
+    textQuestionInput.value = text;
     const provider = selectAiProvider.value;
     const storageKey = keyStorageMap[provider] || 'geminiApiKey';
 
