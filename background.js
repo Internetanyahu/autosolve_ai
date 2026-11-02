@@ -199,11 +199,11 @@ ${userPrompt}
 
   const configs = {
     gemini: { model: 'gemini-3.8-flash' },
-    openai: { model: 'gpt-4o-mini', baseUrl: 'https://api.openai.com/v1' },
-    anthropic: { model: 'claude-3-5-haiku-20241022' },
-    claude: { model: 'claude-3-5-haiku-20241022' },
+    openai: { model: 'gpt-5.5', baseUrl: 'https://api.openai.com/v1' },
+    anthropic: { model: 'claude-haiku-5-5' },
+    claude: { model: 'claude-haiku-5-5' },
     deepseek: { model: 'deepseek-chat', baseUrl: 'https://api.deepseek.com' },
-    custom: { model: model || 'openai/gpt-4o-mini', baseUrl: baseUrl || 'https://openrouter.ai/api/v1' },
+    custom: { model: model || 'openai/gpt-5.5', baseUrl: 'https://openrouter.ai/api/v1' },
   };
   const config = configs[provider];
   if (!config) throw new Error(`Unsupported AI provider: ${provider}`);
@@ -256,7 +256,7 @@ ${userPrompt}
     if (!response.ok) throw new Error(`Anthropic API HTTP ${response.status}: ${data.error?.message || body.slice(0, 700) || 'Request failed'}`);
     rawOutput = Array.isArray(data.content) ? data.content.map(part => part.text || '').join('').trim() : '';
   } else {
-    const endpoint = (config.baseUrl || baseUrl || '').replace(/\/+$/, '');
+    const endpoint = (provider === 'custom' ? (baseUrl || config.baseUrl) : config.baseUrl).replace(/\/+$/, '');
     if (!endpoint || !/^https:\/\//i.test(endpoint)) throw new Error('The custom provider endpoint must be a valid HTTPS URL.');
     response = await fetch(`${endpoint}/chat/completions`, {
       method: 'POST',
