@@ -710,8 +710,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         responseHandled = true;
         btnSolveText.disabled = false;
         btnSolveText.textContent = 'Solve & Number Answers';
-        appendLog('ERROR', 'Solve timed out after 110 seconds. The AI provider or server did not finish responding. Check the provider status and try again.');
-      }, 110000);
+        appendLog('ERROR', 'Solve timed out after 60 seconds. The AI provider or server did not finish responding. Check the provider status and try again.');
+      }, 60000);
 
       try {
         chrome.runtime.sendMessage(
