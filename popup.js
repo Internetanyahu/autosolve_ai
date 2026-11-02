@@ -703,54 +703,80 @@ document.addEventListener('DOMContentLoaded', async () => {
       const apiKey = store[storageKey] || '';
 
       // Send to background service worker for processing
-      chrome.runtime.sendMessage(
-        {
-          action: 'TRIGGER_TEXT_SOLVE',
-          text,
-          provider,
-          apiKey,
-          model: store.customModel || '',
-          baseUrl: store.customBaseUrl || '',
-        },
-        (res) => {
+      let responseHandled = false;
+      const solveTimeoutId = setTimeout(() => {
+        if (responseHandled) return;
+        responseHandled = true;
+        btnSolveText.disabled = false;
+        btnSolveText.textContent = 'Solve & Number Answers';
+        appendLog('ERROR', 'Solve timed out after 90 seconds. The AI provider or server did not finish responding. Check the provider status and try again.');
+      }, 90000);
+
+      try {
+        chrome.runtime.sendMessage(
+          {
+            action: 'TRIGGER_TEXT_SOLVE',
+            text,
+            provider,
+            apiKey,
+            model: store.customModel || '',
+            baseUrl: store.customBaseUrl || '',
+          },
+          (res) => {
+            if (responseHandled) return;
+            responseHandled = true;
+            clearTimeout(solveTimeoutId);
+
+            const runtimeError = chrome.runtime.lastError;
+            btnSolveText.disabled = false;
+            btnSolveText.textContent = 'Solve & Number Answers';
+
+            if (runtimeError) {
+              appendLog('ERROR', `Solve failed: ${runtimeError.message}`);
+              return;
+            }
+            if (!res || !res.success) {
+              appendLog('ERROR', `Solve failed: ${res?.error || 'Background worker returned no result.'}`);
+              return;
+            }
+
+            const result = normalizeAndExtractAnswers(res.result, text);
+
+            appendLog('COMPLETE', `=== [TEXT MODE RESULTS] (${result.provider || provider}) ===`);
+            if (result.question) {
+              appendLog('INFO', `Q: "${result.question}"`);
+            }
+
+            if (Array.isArray(result.answers) && result.answers.length > 0) {
+              result.answers.forEach((ans) => {
+                const numStr = ans.number ? `[${ans.number}]` : '[1]';
+                const letterStr = ans.letter ? `(${ans.letter}) ` : '(A) ';
+                appendLog('CLICK', `👉 ANSWER ${numStr} ${letterStr}"${ans.text}"`);
+              });
+            }
+
+            if (Array.isArray(result.dropdowns) && result.dropdowns.length > 0) {
+              result.dropdowns.forEach((dd, idx) => {
+                appendLog('CLICK', `👉 DROPDOWN [${dd.menuNumber || idx + 1}]: Choose [${dd.selectedNumber || 1}] "${dd.selectedAnswer}"`);
+              });
+            }
+
+            if (result.conciseReasoning) {
+              appendLog('REASONING', `Reasoning: ${result.conciseReasoning}`);
+            }
+
+            renderBigGreenAnswer(result.answers, result.dropdowns || []);
+          }
+        );
+      } catch (error) {
+        if (!responseHandled) {
+          responseHandled = true;
+          clearTimeout(solveTimeoutId);
           btnSolveText.disabled = false;
           btnSolveText.textContent = 'Solve & Number Answers';
-
-          if (!res || !res.success) {
-            appendLog('ERROR', `Solve failed: ${res?.error || 'Unknown error'}`);
-            return;
-          }
-
-          const result = normalizeAndExtractAnswers(res.result, text);
-
-          // STRICT REQUIREMENT: Output answers in the console with numbers!
-          appendLog('COMPLETE', `=== [TEXT MODE RESULTS] (${result.provider || provider}) ===`);
-          if (result.question) {
-            appendLog('INFO', `Q: "${result.question}"`);
-          }
-
-          if (Array.isArray(result.answers) && result.answers.length > 0) {
-            result.answers.forEach((ans) => {
-              const numStr = ans.number ? `[${ans.number}]` : '[1]';
-              const letterStr = ans.letter ? `(${ans.letter}) ` : '(A) ';
-              appendLog('CLICK', `👉 ANSWER ${numStr} ${letterStr}"${ans.text}"`);
-            });
-          }
-
-          if (Array.isArray(result.dropdowns) && result.dropdowns.length > 0) {
-            result.dropdowns.forEach((dd, idx) => {
-              appendLog('CLICK', `👉 DROPDOWN [${dd.menuNumber || idx + 1}]: Choose [${dd.selectedNumber || 1}] "${dd.selectedAnswer}"`);
-            });
-          }
-
-          if (result.conciseReasoning) {
-            appendLog('REASONING', `Reasoning: ${result.conciseReasoning}`);
-          }
-
-          // BIG GLOWING GREEN ANSWER BANNER AT THE END (OBVIOUS & UNMISTAKABLE)
-          renderBigGreenAnswer(result.answers, result.dropdowns || []);
+          appendLog('ERROR', `Could not send solve request: ${error.message}`);
         }
-      );
+      }
     });
   };
 
