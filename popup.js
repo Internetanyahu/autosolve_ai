@@ -771,7 +771,7 @@ document.addEventListener('DOMContentLoaded', async () => {
               appendLog('REASONING', `Reasoning: ${result.conciseReasoning}`);
             }
 
-            renderBigGreenAnswer(result.answers, result.dropdowns || [], true, result.rawText || '');
+            renderBigGreenAnswer(result.answers, result.dropdowns || [], true, result.rawText || (!result.answers.length ? result.conciseReasoning || '' : ''));
           }
         );
       } catch (error) {
