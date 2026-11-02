@@ -199,6 +199,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     return result;
   }
   // Multi-AI Key Management & Live Online Verification
+  async function discoverGeminiModelsForKey(key) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
+  try {
+    const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models?key=' + encodeURIComponent(key), { signal: controller.signal });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error?.message || ('HTTP ' + response.status));
+    const models = (data.models || []).filter(model => Array.isArray(model.supportedGenerationMethods) && model.supportedGenerationMethods.includes('generateContent') && /^models\/gemini-.*flash/i.test(model.name || '')).map(model => model.name.replace(/^models\//, ''));
+    if (!models.length) throw new Error('Google listed no Gemini Flash models supporting text generation for this key.');
+    return models;
+  } catch (error) {
+    if (error && error.name === 'AbortError') throw new Error('Google model-list request timed out after 8 seconds.');
+    throw error;
+  } finally { clearTimeout(timeoutId); }
+}
   async function testAndVerifyKey(provider, key) {
     if (!key || key.trim().length < 5) {
       statusBadge.innerHTML = `<span style="color:#ef4444;">● Paste ${provider.toUpperCase()} Key</span>`;
@@ -245,37 +260,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     try {
       const startTime = Date.now();
       if (provider === 'gemini') {
-        const testModels = ['gemini-3.5-flash-lite', 'gemini-flash-lite-latest', 'gemini-3.5-flash'];
-        let ok = false;
-        let lastErr = '';
-        for (const m of testModels) {
-          try {
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${key}`;
-            const r = await fetch(url, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ contents: [{ parts: [{ text: 'ping' }] }] }),
-            });
-            if (r.ok || r.status === 429) { ok = true; break; }
-            const errData = await r.json().catch(() => ({}));
-            lastErr = errData.error?.message || `HTTP ${r.status}`;
-            if (r.status === 400 || r.status === 401 || r.status === 403) break;
-          } catch (e) {
-            lastErr = e.message;
-          }
-        }
-        if (ok) {
-          const latency = Date.now() - startTime;
-          statusBadge.innerHTML = `<span style="color:#10b981;">● Online & Valid (${latency}ms)</span>`;
-          statusBadge.title = 'Google Gemini API is active and online. Click to re-test.';
-          appendLog('INFO', `Gemini API key verified directly (${latency}ms).`);
-          return true;
-        } else {
-          statusBadge.innerHTML = `<span style="color:#ef4444;">● Invalid Key (${(lastErr || 'Error').slice(0, 18)})</span>`;
-          statusBadge.title = lastErr || 'Key rejected by Google';
-          appendLog('ERROR', `Gemini key error: ${lastErr}`);
-          return false;
-        }
+        const availableModels = await discoverGeminiModelsForKey(key);
+        const latency = Date.now() - startTime;
+        statusBadge.innerHTML = `<span style="color:#10b981;">● Key Valid · ${availableModels.length} Flash model(s)</span>`;
+        statusBadge.title = `Google accepted the key and listed: ${availableModels.join(', ')}. This does not guarantee immediate model capacity.`;
+        appendLog('INFO', `Gemini API key verified through model discovery. Available: ${availableModels.join(', ')} (${latency}ms).`);
+        return true;
       } else if (provider === 'openai') {
         const r = await fetch('https://api.openai.com/v1/models', {
           headers: { Authorization: `Bearer ${key}` },
