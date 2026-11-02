@@ -40,79 +40,69 @@
   const setHandle = handle => idbRun("readwrite", store => store.put(handle, HANDLE_KEY));
   const clearHandle = () => idbRun("readwrite", store => store.delete(HANDLE_KEY));
 
-  // ---- GitHub helpers -----------------------------------------------------------
-  async function gh(path, token) {
-    const headers = {
-      "Accept": "application/vnd.github+json",
-      "X-GitHub-Api-Version": "2022-11-28"
-    };
-    const activeToken = String(token || "").trim();
-    if (activeToken) headers.Authorization = "Bearer " + activeToken;
+  // ---- CDN helpers --------------------------------------------------------------
+  // Use jsDelivr's GitHub mirror instead of api.github.com. This avoids
+  // GitHub's unauthenticated REST API rate limit. The package tree provides
+  // paths; file bytes are hashed locally to detect changes.
+  const CDN_TREE = "https://data.jsdelivr.com/v1/package/gh/" + REPO + "@" + BRANCH;
+  const CDN_FILE = "https://cdn.jsdelivr.net/gh/" + REPO + "@" + BRANCH + "/";
 
-    // A stalled GitHub request must never leave the updater in "Checking…".
+  async function cdnFetch(url, label) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 12000);
+    const timeout = setTimeout(() => controller.abort(), 20000);
     try {
-      let response = await fetch(API + path, {
-        headers,
+      const response = await fetch(url, {
         cache: "no-store",
         signal: controller.signal
       });
-
-      // The repository is public. If an optional saved token is invalid,
-      // retry anonymously rather than blocking the update check.
-      if (response.status === 401 && activeToken) {
-        response = await fetch(API + path, {
-          headers: {
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28"
-          },
-          cache: "no-store",
-          signal: controller.signal
-        });
-      }
-
       if (!response.ok) {
-        const detail = await response.json().catch(() => ({}));
-        const reason = detail.message ? ": " + detail.message : "";
-        if (response.status === 401 || response.status === 403) {
-          throw new Error("GitHub API access failed (" + response.status + ")" + reason);
-        }
-        if (response.status === 404) {
-          throw new Error("Repository or branch not found (404). Check that " + REPO + " is public and the branch exists.");
-        }
-        throw new Error("GitHub request failed (" + response.status + ")" + reason);
+        throw new Error((label || "CDN request") + " failed (" + response.status + ").");
       }
-      return await response.json();
+      return response;
     } catch (error) {
       if (error?.name === "AbortError") {
-        throw new Error("GitHub did not respond within 12 seconds. Check your connection and try again.");
+        throw new Error((label || "CDN request") + " timed out after 20 seconds.");
       }
       throw error;
     } finally {
       clearTimeout(timeout);
     }
   }
-  async function remoteExtensionSha(token) {
-    // The Git Trees API accepts a branch name directly. This is the same
-    // one-request check used by the PPUSA extension updater.
-    const tree = await gh("/git/trees/" + BRANCH, token);
-    const treeSha = tree?.sha;
-    if (!treeSha) throw new Error("No repository tree found on " + BRANCH + ".");
-    return treeSha;
+
+  function flattenPackageTree(entries, prefix = "", output = []) {
+    for (const entry of entries || []) {
+      const path = prefix ? prefix + "/" + entry.name : entry.name;
+      if (entry.type === "directory") {
+        flattenPackageTree(entry.files, path, output);
+      } else if (entry.type === "file" && path !== "README.md" && !path.startsWith(".github/")) {
+        output.push(path);
+      }
+    }
+    return output;
   }
-  async function remoteFiles(token, extensionSha) {
-    const listing = await gh("/git/trees/" + extensionSha + "?recursive=1", token);
-    if (listing.truncated) throw new Error("GitHub returned a truncated file list; refusing to update.");
-    return (listing.tree || []).filter(item => item.type === "blob" && item.path !== "README.md" && !item.path.startsWith(".github/")).map(item => ({ path: item.path, sha: item.sha }));
+
+  async function remoteFiles() {
+    const response = await cdnFetch(CDN_TREE, "CDN package listing");
+    const listing = await response.json();
+    const paths = flattenPackageTree(listing.files);
+    if (!paths.includes("manifest.json")) {
+      throw new Error("The CDN package listing has no manifest.json; refusing to update.");
+    }
+
+    const files = [];
+    for (const path of paths) {
+      const url = CDN_FILE + path.split("/").map(encodeURIComponent).join("/");
+      const fileResponse = await cdnFetch(url, "Download of " + path);
+      const bytes = new Uint8Array(await fileResponse.arrayBuffer());
+      files.push({ path, sha: await gitBlobSha(bytes), bytes });
+    }
+    return files;
   }
-  async function downloadBlob(token, sha) {
-    const blob = await gh("/git/blobs/" + sha, token);
-    if (blob.encoding !== "base64") throw new Error("Unexpected blob encoding from GitHub.");
-    const binary = atob(String(blob.content).replace(/\s/g, ""));
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    return bytes;
+
+  async function remoteExtensionSha(files) {
+    const snapshot = files.map(file => file.path + ":" + file.sha).sort().join("\n");
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(snapshot));
+    return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("");
   }
 
   // ---- Local file helpers -----------------------------------------------------------
@@ -196,14 +186,15 @@
     return (await chrome.storage.local.get("updaterState")).updaterState || {};
   }
 
-  // Check the configured GitHub repository first. A local folder link is
-  // relevant only when installing, never when discovering repository updates.
+  // Check the public repository through jsDelivr's CDN mirror. No GitHub
+  // account, API token, or api.github.com request is required.
   async function check(token) {
     const prior = await getUpdaterState();
     try {
       const handle = await getHandle().catch(() => null);
       const activeToken = String(token || "").trim();
-      const remoteSha = await remoteExtensionSha(activeToken);
+      const files = await remoteFiles();
+      const remoteSha = await remoteExtensionSha(files);
       let appliedSha = prior.appliedSha;
       if (!appliedSha) {
         appliedSha = remoteSha;
@@ -255,18 +246,15 @@
     if (permission !== "granted" && interactive) permission = await handle.requestPermission({ mode: "readwrite" });
     if (permission !== "granted") return { ok: false, needsPermission: true, error: "Folder access needs to be granted again." };
 
-    const remoteSha = await remoteExtensionSha(token);
-    const files = await remoteFiles(token, remoteSha);
-    if (!files.some(file => file.path === "manifest.json")) throw new Error("The remote extension folder has no manifest.json; refusing to update.");
+    const files = await remoteFiles();
+    const remoteSha = await remoteExtensionSha(files);
 
     const changed = [];
     for (const file of files) {
       const local = await readLocal(handle, file.path);
       if (file.path === "manifest.json" && local) {
-        const remoteBytes = await downloadBlob(token, file.sha);
-        if (await gitBlobSha(remoteBytes) !== file.sha) throw new Error("Download of manifest.json failed its integrity check.");
-        if (!manifestsEqualExceptVersion(local, remoteBytes)) {
-          changed.push({ ...file, preloadedBytes: remoteBytes, localManifest: local });
+        if (!manifestsEqualExceptVersion(local, file.bytes)) {
+          changed.push({ ...file, preloadedBytes: file.bytes, localManifest: local });
         }
       } else if (!local || await gitBlobSha(local) !== file.sha) {
         changed.push(file);
@@ -278,7 +266,7 @@
     // Download and verify everything before writing anything.
     const downloaded = [];
     for (const file of changed) {
-      const sourceBytes = file.preloadedBytes || await downloadBlob(token, file.sha);
+      const sourceBytes = file.preloadedBytes || file.bytes;
       if (await gitBlobSha(sourceBytes) !== file.sha) throw new Error("Download of " + file.path + " failed its integrity check.");
       const bytes = file.path === "manifest.json" && file.localManifest
         ? preserveInstalledManifestVersion(sourceBytes, file.localManifest)
