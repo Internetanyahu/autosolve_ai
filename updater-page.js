@@ -6,7 +6,6 @@ const applyButton = $("apply");
 let busy = false;
 
 const log = message => { logEl.textContent += "\n" + message; };
-const getToken = async () => (await chrome.storage.local.get("githubFineGrainedToken")).githubFineGrainedToken || "";
 const short = sha => (sha || "").slice(0, 7);
 
 function setBusy(value) {
@@ -18,7 +17,7 @@ async function render() {
   $("version").textContent = "Installed version v" + chrome.runtime.getManifest().version;
   // This page loads updater.js directly, so check GitHub here instead of
   // depending on a background-worker message that can fail to answer.
-  const info = await AutoSolveUpdater.check(await getToken());
+  const info = await AutoSolveUpdater.check();
   const linkStatus = $("linkStatus");
   const updateStatus = $("updateStatus");
   const repoLink = $("repoLink");
@@ -61,7 +60,7 @@ async function installUpdate() {
   setBusy(true);
   try {
     log("Comparing local files with GitHub…");
-    const result = await AutoSolveUpdater.apply(await getToken(), { interactive: true });
+    const result = await AutoSolveUpdater.apply({ interactive: true });
     if (!result.ok) {
       log(result.error || "Update failed.");
       return;
