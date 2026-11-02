@@ -37,21 +37,60 @@ function logEvent(level, message, data = null) {
   });
 }
 
-function normalizeAndExtractAnswers(result) {
-  if (!result || typeof result !== 'object') result = {};
+function normalizeAndExtractAnswers(result, rawInputText = '') {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) result = {};
   if (!Array.isArray(result.answers)) result.answers = [];
   if (!Array.isArray(result.allChoices)) result.allChoices = [];
   if (!Array.isArray(result.dropdowns)) result.dropdowns = [];
-  if (result.answers.length) {
-    result.answers = result.answers.map((answer, index) => ({
-      ...answer,
-      number: Number.isInteger(answer.number) && answer.number > 0 ? answer.number : index + 1,
-      letter: answer.letter || String.fromCharCode(65 + index),
-      text: String(answer.text || ''),
+
+  const choices = result.allChoices;
+  if (!result.answers.length && choices.length) {
+    result.answers = choices.filter(choice => choice && choice.isCorrect === true).map((choice, index) => ({
+      number: Number.isInteger(choice.number) && choice.number > 0 ? choice.number : index + 1,
+      letter: choice.letter || String.fromCharCode(65 + index),
+      text: String(choice.text || ''),
       isCorrect: true,
-      confidence: typeof answer.confidence === 'number' ? answer.confidence : null,
-    }));
+      confidence: typeof choice.confidence === 'number' ? choice.confidence : 0.98,
+    })).filter(answer => answer.text);
   }
+
+  if (!result.answers.length && choices.length && result.conciseReasoning) {
+    const reasoning = String(result.conciseReasoning).toLowerCase();
+    const mentioned = choices.find(choice => choice && choice.text &&
+      reasoning.includes(String(choice.text).trim().toLowerCase()));
+    if (mentioned) {
+      const index = choices.indexOf(mentioned);
+      result.answers = [{
+        number: Number.isInteger(mentioned.number) && mentioned.number > 0 ? mentioned.number : index + 1,
+        letter: mentioned.letter || String.fromCharCode(65 + index),
+        text: String(mentioned.text),
+        isCorrect: true,
+        confidence: 0.85,
+      }];
+    }
+  }
+
+  result.answers = result.answers.filter(answer => answer && typeof answer === 'object').map((answer, index) => {
+    const answerText = String(answer.text || '').trim();
+    let matchedIndex = -1;
+    if (answerText) {
+      matchedIndex = choices.findIndex(choice => choice && choice.text &&
+        String(choice.text).trim().toLowerCase() === answerText.toLowerCase());
+    }
+    const matched = matchedIndex >= 0 ? choices[matchedIndex] : null;
+    const number = matched && Number.isInteger(matched.number) && matched.number > 0
+      ? matched.number
+      : (Number.isInteger(answer.number) && answer.number > 0 ? answer.number : index + 1);
+    return {
+      ...answer,
+      number,
+      letter: (matched && matched.letter) || answer.letter || String.fromCharCode(64 + number),
+      text: answerText,
+      isCorrect: true,
+      confidence: typeof answer.confidence === 'number' ? answer.confidence : 0.98,
+    };
+  }).filter(answer => answer.text);
+
   return result;
 }
 
@@ -135,67 +174,47 @@ async function handleTextSolve(req) {
   logEvent('ACTION', `[TEXT MODE] Solving question using ${provider.toUpperCase()}...`);
   logEvent('INFO', '[DIAGNOSTIC] Background build 2026-11-02-b: TRIGGER_TEXT_SOLVE received; backend-first path enabled. Input characters: ' + String(text || '').length);
 
-  // Try backend proxy first
+  // Match the older working backend contract: allow the server to finish and
+  // send the editable prompt as userPrompt (the field its route accepts).
   try {
     const serverUrl = await getServerUrl();
-    logEvent('INFO', '[TEXT MODE] Attempting backend request at ' + serverUrl + '/api/solve-text (20-second limit)...');
+    const userPrompt = await getCustomPrompt();
     const backendStartedAt = Date.now();
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000);
-    let res;
-    let data;
-    try {
-      res = await fetch(`${serverUrl}/api/solve-text`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text,
-          provider,
-          apiKey,
-          model,
-          baseUrl,
-          systemPrompt: await getCustomPrompt(),
-        }),
-        signal: controller.signal,
-      });
-        const responseText = await res.text();
-        logEvent('INFO', '[TEXT MODE] Backend responded with HTTP ' + res.status + ' in ' + (Date.now() - backendStartedAt) + 'ms.');
-      try { data = responseText ? JSON.parse(responseText) : {}; }
-      catch { data = { error: responseText.slice(0, 1000) }; }
-    } finally {
-      clearTimeout(timeoutId);
+    logEvent('INFO', '[TEXT MODE] Sending request to backend using the legacy solve-text contract...');
+    const res = await fetch(`${serverUrl}/api/solve-text`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, provider, apiKey, model, baseUrl, userPrompt }),
+    });
+
+    const responseText = await res.text();
+    logEvent('INFO', '[TEXT MODE] Backend responded with HTTP ' + res.status + ' in ' + (Date.now() - backendStartedAt) + 'ms.');
+    let data = {};
+    try { data = responseText ? JSON.parse(responseText) : {}; }
+    catch { data = { error: responseText.slice(0, 1000) }; }
+
+    const backendResult = data.result || data.solution;
+    if (res.ok && data.success && backendResult) {
+      const result = normalizeAndExtractAnswers(backendResult, text);
+      logEvent('COMPLETE', `[TEXT MODE] Solved via ${provider.toUpperCase()} (${result.model || data.meta?.model || ''})`);
+      if (result.answers.length) {
+        result.answers.forEach(ans => {
+          logEvent('CLICK', `ANSWER [${ans.number}] (${ans.letter}) "${ans.text}"`);
+        });
+      }
+      if (result.dropdowns.length) {
+        result.dropdowns.forEach((dd, idx) => {
+          logEvent('CLICK', `DROPDOWN [${dd.menuNumber || idx + 1}]: Pick [${dd.selectedNumber || 1}] "${dd.selectedAnswer || ''}"`);
+        });
+      }
+      if (result.conciseReasoning) logEvent('REASONING', result.conciseReasoning);
+      return { success: true, result };
     }
 
-    if (res.ok && data.success && data.result) {
-        const result = normalizeAndExtractAnswers(data.result, text);
-        logEvent('COMPLETE', `[TEXT MODE] Solved via ${provider.toUpperCase()} (${result.model || ''})`);
-        
-        // Log answers with numbers directly in console
-        if (Array.isArray(result.answers) && result.answers.length > 0) {
-          result.answers.forEach((ans) => {
-            const numStr = ans.number ? `[${ans.number}]` : '[1]';
-            const letterStr = ans.letter ? `(${ans.letter}) ` : '(A) ';
-            logEvent('CLICK', `👉 ANSWER ${numStr} ${letterStr}"${ans.text}"`);
-          });
-        }
-        if (Array.isArray(result.dropdowns) && result.dropdowns.length > 0) {
-          result.dropdowns.forEach((dd, idx) => {
-            logEvent('CLICK', `👉 DROPDOWN [${dd.menuNumber || idx + 1}]: Pick -> [${dd.selectedNumber || 1}] "${dd.selectedAnswer}"`);
-          });
-        }
-        if (result.conciseReasoning) {
-          logEvent('REASONING', result.conciseReasoning);
-        }
-
-        return { success: true, result };
-    }
-    const backendMessage = data?.error || data?.message || (data?.success === false ? 'Backend returned success=false without an error message.' : '');
-    logEvent('ERROR', '[TEXT MODE] Backend solve failed; attempting direct ' + provider.toUpperCase() + ' fallback. HTTP ' + res.status + (backendMessage ? ': ' + backendMessage : ''));
-    console.warn('[AutoSolve AI] Backend solve failed; attempting direct provider fallback.', { status: res.status, response: data });
+    const backendMessage = data?.error || data?.message || 'Backend did not return a usable result.';
+    logEvent('ERROR', '[TEXT MODE] Backend solve failed; attempting direct provider fallback. HTTP ' + res.status + ': ' + backendMessage);
   } catch (backendErr) {
-    const detail = backendErr?.name === 'AbortError' ? '20-second timeout' : (backendErr?.message || String(backendErr));
-    logEvent('ERROR', '[TEXT MODE] Backend request failed; switching to direct ' + provider.toUpperCase() + ' API. ' + detail);
-    console.warn('[AutoSolve AI] Backend request failed; attempting direct provider fallback...', backendErr);
+    logEvent('ERROR', '[TEXT MODE] Backend request failed; attempting direct ' + provider.toUpperCase() + ' fallback. ' + (backendErr?.message || String(backendErr)));
   }
 
   // Direct client fetch for Gemini if backend is down
@@ -303,59 +322,27 @@ chrome.commands.onCommand.addListener(command => {
   });
 });
 
-async function getAvailableGeminiModels(apiKey) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 8000);
-  try {
-    const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models?key=' + encodeURIComponent(apiKey), { signal: controller.signal });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error?.message || ('Gemini model discovery failed (HTTP ' + response.status + ').'));
-    const preferred = ['gemini-3.5-flash-lite', 'gemini-3.8-flash'];
-    const models = (data.models || []).filter(item =>
-      Array.isArray(item.supportedGenerationMethods) && item.supportedGenerationMethods.includes('generateContent') &&
-      /^models\/gemini-.*flash/i.test(item.name || '')
-    ).map(item => String(item.name).replace(/^models\//, ''));
-    models.sort((a, b) => {
-      const ai = preferred.indexOf(a), bi = preferred.indexOf(b);
-      if (ai !== -1 || bi !== -1) return ai === -1 ? 1 : bi === -1 ? -1 : ai - bi;
-      return (a.includes('latest') ? 0 : 1) - (b.includes('latest') ? 0 : 1) || a.localeCompare(b);
-    });
-    if (!models.length) throw new Error('Google listed no Gemini Flash models supporting generateContent for this API key.');
-    return models;
-  } catch (error) {
-    if (error && error.name === 'AbortError') throw new Error('Gemini model discovery timed out after 8 seconds.');
-    throw error;
-  } finally { clearTimeout(timeoutId); }
-}
 function parseGeminiJson(raw) {
-  const text = String(raw || '').replace(/^\uFEFF/, '').trim();
-  if (!text) throw new Error('Gemini returned an empty response.');
+  const source = String(raw || '').replace(/^\\uFEFF/, '').trim();
+  if (!source) throw new Error('Gemini returned an empty response.');
 
-  const candidates = [];
-  const unfenced = text
-    .replace(/^\s*```(?:json)?\s*/i, '')
-    .replace(/\s*```\s*$/i, '')
-    .trim();
-  candidates.push(unfenced);
-
-  // Models sometimes add a short sentence before or after an otherwise valid JSON object.
-  const start = unfenced.indexOf('{');
+  const candidates = [source.replace(/^\s*```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim()];
+  const text = candidates[0];
+  const start = text.indexOf('{');
   if (start !== -1) {
     let depth = 0;
     let inString = false;
     let escaped = false;
-    for (let i = start; i < unfenced.length; i++) {
-      const ch = unfenced[i];
+    for (let i = start; i < text.length; i++) {
+      const ch = text[i];
       if (inString) {
         if (escaped) escaped = false;
         else if (ch === '\\\\') escaped = true;
         else if (ch === '"') inString = false;
-        continue;
-      }
-      if (ch === '"') inString = true;
+      } else if (ch === '"') inString = true;
       else if (ch === '{') depth++;
       else if (ch === '}' && --depth === 0) {
-        candidates.push(unfenced.slice(start, i + 1));
+        candidates.push(text.slice(start, i + 1));
         break;
       }
     }
@@ -368,92 +355,103 @@ function parseGeminiJson(raw) {
       if (Array.isArray(parsed)) return { answers: parsed };
     } catch {}
   }
-
-  throw new Error('Gemini response was not parseable JSON. Response excerpt: ' + text.slice(0, 240));
+  throw new Error('Gemini returned a response that could not be recovered as JSON. Excerpt: ' + source.slice(0, 300));
 }
 
-// Text-only Gemini fallback. Each model request is bounded so a stalled
-// provider cannot leave the extension waiting forever.
+const AUTOSOLVE_SYSTEM_PROMPT = `You are AutoSolve AI in Text Mode, a general-purpose question and assessment solver.
+
+Read the entire supplied page text before answering. Identify every distinct question and sub-question in page order. Do not stop after the first question. Preserve top-to-bottom, then left-to-right order. Include the original question wording in each answer object's question field when available.
+
+For multiple-choice questions, evaluate only the choices actually supplied. Number choices in their displayed order starting at 1 and preserve their exact text and letter. For multi-select questions, return every correct choice and no incorrect choices. For dropdowns, use only options actually supplied and identify the selected option and its menu number. For written-response questions, provide a concise direct answer.
+
+Do not assume a particular school, course, subject, curriculum, website, or employer. Do not invent answer choices, missing context, citations, or facts. If a question is incomplete or cannot be answered reliably, include it and explain what is missing instead of guessing. Do not fabricate an answer merely to fill the output.
+
+Return only valid JSON using this structure:
+{
+  "question": "Page summary or first question",
+  "questionType": "single_choice | multiple_choice | dropdown | true_false | text | other",
+  "conciseReasoning": "Concise explanation",
+  "answers": [
+    {
+      "number": 1,
+      "question": "Question wording",
+      "letter": "A",
+      "text": "Answer text",
+      "isCorrect": true,
+      "confidence": 0.0
+    }
+  ],
+  "allChoices": [],
+  "dropdowns": [],
+  "options": [],
+  "hasVideo": false
+}
+
+The answers array must contain one entry per detected question/sub-question in page order. Use an empty answers array only when no questions or answerable tasks are present. Ensure the JSON is complete and syntactically valid.`;
+
 async function queryGeminiDirectly(apiKey, prompt = '') {
   if (!apiKey) throw new Error('Gemini API key is required.');
   const questionText = String(prompt || '');
-  logEvent('INFO', '[TEXT MODE] Preparing direct Gemini request...');
-  const systemPrompt = await getCustomPrompt();
-  const body = {
-    contents: [{ role: 'user', parts: [{ text: questionText }] }],
-    ...(systemPrompt ? { systemInstruction: { parts: [{ text: systemPrompt }] } } : {}),
-    generationConfig: { responseMimeType: 'application/json', temperature: 0.1 }
+  const userPrompt = await getCustomPrompt();
+  const promptContent = `User Question / Content:
+${questionText || '(No question text was supplied)'}
+
+${userPrompt ? `User Instructions:
+${userPrompt}
+
+` : ''}Solve the supplied questions accurately. Return the required JSON only.`;
+
+  const requestBody = {
+    contents: [{ parts: [{ text: promptContent }] }],
+    systemInstruction: { parts: [{ text: AUTOSOLVE_SYSTEM_PROMPT }] },
+    generationConfig: { responseMimeType: 'application/json', temperature: 0.1 },
   };
 
-  const models = await getAvailableGeminiModels(apiKey);
-  logEvent('INFO', '[TEXT MODE] Google reports available Flash models: ' + models.join(', '));
+  // Restore the old sequential fallback behavior. No short per-model timeout:
+  // slower successful generations must be allowed to finish.
+  const models = [...new Set([
+    'gemini-3.5-flash-lite',
+    'gemini-flash-lite-latest',
+    'gemini-3.5-flash',
+    'gemini-flash-latest',
+  ])];
   const failures = [];
 
-  for (const model of models.slice(0, 3)) {
-    // Move to the next model immediately when one is slow or overloaded.
-    for (let attempt = 1; attempt <= 1; attempt++) {
-      logEvent('INFO', `[TEXT MODE] Trying Gemini model ${model} (attempt ${attempt}/1)...`);
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 12000);
-      const requestStartedAt = Date.now();
+  for (const model of models) {
+    logEvent('INFO', `[TEXT MODE] Trying Gemini model ${model}...`);
+    try {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
 
-      try {
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-          signal: controller.signal,
-        });
-
-        if (!response.ok) {
-          const detail = await response.json().catch(() => ({}));
-          const message = detail.error?.message || `Gemini HTTP ${response.status}`;
-          const error = new Error(message);
-          error.status = response.status;
-          throw error;
-        }
-
-        logEvent('INFO', `[TEXT MODE] Gemini ${model} returned HTTP ${response.status} in ${Date.now() - requestStartedAt}ms; reading response...`);
-        const data = await response.json();
-        const raw = data.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('').trim();
-        if (!raw) throw new Error('Gemini returned an empty response.');
-
-        const parsed = parseGeminiJson(raw);
-        if (!Array.isArray(parsed.answers)) {
-          throw new Error('Gemini JSON did not contain an answers array.');
-        }
-
-        logEvent('INFO', `[TEXT MODE] Gemini model ${model} responded successfully.`);
-        return normalizeAndExtractAnswers(parsed, questionText);
-      } catch (error) {
-        const failure = error?.name === 'AbortError'
-          ? new Error(`Gemini model ${model} timed out after 12 seconds.`)
-          : error;
-        const message = String(failure?.message || failure);
-        const temporary = failure?.status === 429 ||
-          [500, 502, 503, 504].includes(failure?.status) ||
-          /high demand|overload|temporar(il|y)|try again later|resource exhausted|rate.?limit|unavailable/i.test(message);
-
-        failures.push(`${model}: ${message}`);
-        logEvent('INFO', `[TEXT MODE] ${model} failed: ${message}`);
-
-        if (temporary) {
-          logEvent('INFO', `[TEXT MODE] ${model} is temporarily unavailable; moving to the next model.`);
-        }
-        break;
-      } finally {
-        clearTimeout(timeoutId);
+      if (!response.ok) {
+        const detail = await response.text();
+        throw new Error(`Gemini API error (${response.status}) on ${model}: ${detail.slice(0, 300)}`);
       }
+
+      const data = await response.json();
+      const raw = data.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('').trim();
+      if (!raw) {
+        const reason = data.promptFeedback?.blockReason || data.candidates?.[0]?.finishReason || 'No candidate text returned';
+        throw new Error(`Gemini returned no answer text (${reason}).`);
+      }
+
+      const parsed = parseGeminiJson(raw);
+      const result = normalizeAndExtractAnswers(parsed, questionText);
+      result.provider = 'gemini';
+      result.model = model;
+      logEvent('INFO', `[TEXT MODE] Gemini model ${model} returned a recoverable JSON result.`);
+      return result;
+    } catch (error) {
+      const message = error?.message || String(error);
+      failures.push(`${model}: ${message}`);
+      logEvent('INFO', `[TEXT MODE] ${model} failed: ${message}`);
     }
   }
 
-  const allTemporary = failures.length > 0 && failures.every(item =>
-    /high demand|overload|temporar(il|y)|try again later|resource exhausted|rate.?limit|unavailable|HTTP (429|500|502|503|504)/i.test(item)
-  );
-  if (allTemporary) {
-    throw new Error('Gemini is temporarily overloaded or rate-limited across the available models. AutoSolve retried each model and none was available. Wait briefly and try again. Details: ' + failures.join(' | '));
-  }
-  throw new Error('All direct Gemini attempts failed. ' + (failures.join(' | ') || 'Gemini request failed.'));
+  throw new Error('All direct Gemini models failed. ' + failures.join(' | '));
 }
 
 // GitHub updater flow follows PPUSA: one branch-tree check, cached status,
