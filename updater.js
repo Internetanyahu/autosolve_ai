@@ -12,7 +12,6 @@
   const REPO = "Internetanyahu/autosolve_ai";
   const BRANCH = "main";
   const EXPECTED_NAME = "AutoSolve AI - Text Q&A";
-  const API = "https://api.github.com/repos/" + REPO;
   const HANDLE_KEY = "extensionDir";
 
   // ---- IndexedDB storage for the folder handle -------------------------------
@@ -215,16 +214,13 @@
     } catch (error) {
       const handle = await getHandle().catch(() => null);
       const message = error?.message || "GitHub check failed.";
-      const authHint = !token
-        ? " If the repository is private, save a fine-grained GitHub token with Contents: Read-only access."
-        : "";
       return {
         currentVersion: chrome.runtime.getManifest().version,
         linked: Boolean(handle),
         lastApplied: prior.lastApplied || null,
         checkedAt: new Date().toISOString(),
         githubUrl: "https://github.com/" + REPO,
-        error: message + authHint
+        error: message
       };
     }
   }
