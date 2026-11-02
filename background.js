@@ -174,6 +174,21 @@ async function handleTextSolve(req) {
   logEvent('ACTION', `[TEXT MODE] Solving question using ${provider.toUpperCase()}...`);
   logEvent('INFO', '[DIAGNOSTIC] TRIGGER_TEXT_SOLVE received. Input characters: ' + String(text || '').length);
 
+  // Gemini is called directly from the extension. The hosted backend has a
+  // legacy JSON-only parser that rejects valid plain-text generations.
+  if (provider === 'gemini') {
+    const key = apiKey || await getGeminiApiKey();
+    if (!key) throw new Error('Gemini API key is required. Please paste your key in the popup.');
+    const result = await queryGeminiDirectly(key, text || '');
+    if (Array.isArray(result.answers) && result.answers.length) {
+      result.answers.forEach(ans => logEvent('CLICK', `ANSWER [${ans.number}] (${ans.letter}) "${ans.text}"`));
+    }
+    if (result.rawText) logEvent('REASONING', result.rawText);
+    else if (result.conciseReasoning) logEvent('REASONING', result.conciseReasoning);
+    logEvent('COMPLETE', `[TEXT MODE] Solved directly with Gemini (${result.model || 'Gemini API'}).`);
+    return { success: true, result };
+  }
+
   // Match the older working backend contract: allow the server to finish and
   // send the editable prompt as userPrompt (the field its route accepts).
   try {
@@ -409,12 +424,14 @@ ${userPrompt}
 
   // Restore the old sequential fallback behavior. No short per-model timeout:
   // slower successful generations must be allowed to finish.
-  const models = [...new Set([
+  // Use distinct, documented model IDs. Avoid aliases such as
+  // gemini-flash-latest that can resolve to the same exhausted model.
+  const models = [
     'gemini-3.5-flash-lite',
-    'gemini-flash-lite-latest',
-    'gemini-3.5-flash',
-    'gemini-flash-latest',
-  ])];
+    'gemini-3.1-flash-lite',
+    'gemini-3.6-flash',
+    'gemini-3.8-flash',
+  ];
   const failures = [];
 
   for (const model of models) {
@@ -459,7 +476,9 @@ ${userPrompt}
       failures.push(`${model}: ${message}`);
       logEvent('INFO', `[TEXT MODE] ${model} failed: ${message}`);
       if (message.includes('GEMINI_QUOTA_EXHAUSTED')) {
-        throw new Error('Gemini daily request quota is exhausted. Stopped fallback to avoid wasting requests. Check Google AI Studio usage or wait for the quota reset. ' + message.replace('GEMINI_QUOTA_EXHAUSTED: ', ''));
+        // Gemini quotas are model-specific in many projects. Continue only
+        // to a different model ID; aliases have already been removed above.
+        logEvent('INFO', `[TEXT MODE] Quota exhausted for ${model}; trying the next distinct model.`);
       }
     }
   }
