@@ -269,7 +269,7 @@ async function handleAutoCopyAndSolve() {
         text: pageText,
         provider: config.provider,
         apiKey: config.apiKey,
-        model: config.customModel,
+        model: config.provider === 'custom' ? config.customModel : '',
         baseUrl: config.customBaseUrl,
       });
     });
