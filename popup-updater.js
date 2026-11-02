@@ -12,7 +12,15 @@ document.addEventListener("DOMContentLoaded", () => {
   async function refreshUpdateStatus() {
     status.textContent = "Checking GitHub for updates…";
     try {
-      const response = await chrome.runtime.sendMessage({ action: "CHECK_FOR_UPDATES" });
+      // Bound the message wait so a sleeping or failed service worker cannot
+      // leave the popup displaying "Checking…" forever.
+      const response = await Promise.race([
+        chrome.runtime.sendMessage({ action: "CHECK_FOR_UPDATES" }),
+        new Promise((_, reject) => setTimeout(
+          () => reject(new Error("The background updater did not respond within 15 seconds. Open Update setup to check directly.")),
+          15000
+        ))
+      ]);
       const info = response?.updateStatus;
       if (!info) throw new Error(response?.error || "Update check failed.");
       if (releaseLink) releaseLink.style.display = "none";
