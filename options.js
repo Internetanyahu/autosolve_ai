@@ -1,6 +1,5 @@
 document.addEventListener('DOMContentLoaded', () => {
   const providerSelect = document.getElementById('selectedAiProvider');
-  const githubTokenInput = document.getElementById('githubFineGrainedToken');
   const geminiKeyInput = document.getElementById('geminiApiKey');
   const openaiKeyInput = document.getElementById('openaiApiKey');
   const claudeKeyInput = document.getElementById('claudeApiKey');
@@ -49,10 +48,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   );
 
-  chrome.storage.local.get(['githubFineGrainedToken'], (data) => {
-    githubTokenInput.value = data.githubFineGrainedToken || '';
-  });
-
   saveBtn.onclick = () => {
     const payload = {
       selectedAiProvider: providerSelect ? providerSelect.value : 'gemini',
@@ -67,12 +62,10 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     chrome.storage.sync.set(payload, () => {
-      chrome.storage.local.set({ githubFineGrainedToken: githubTokenInput.value.trim() }, () => {
-      showStatus('Settings, API keys, and GitHub token saved successfully.');
+      showStatus('Settings and API keys saved successfully.');
       setTimeout(() => {
         statusMsg.style.display = 'none';
       }, 3500);
-      });
     });
   };
 
