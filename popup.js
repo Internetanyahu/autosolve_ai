@@ -66,6 +66,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   const MAX_STORED_LOGS = 150;
 
+  function removeAccessibilityCredits(value) {
+  return String(value || '').replace(
+    /Credits\\?[\s\S]*?trash icon in the highlighter menu to delete it\.?\\?\s*EN\\?/i,
+    ''
+  );
+}
+
+
   function appendLog(level, msg, saveToStorage = true) {
     const time = new Date().toLocaleTimeString();
     const d = document.createElement('div');
@@ -417,7 +425,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     try {
       if (navigator.clipboard && navigator.clipboard.readText) {
         const text = await navigator.clipboard.readText();
-        if (text && text.trim().length > 0) return text.trim();
+        if (text && text.trim().length > 0) return removeAccessibilityCredits(text).trim();
       }
     } catch (e1) {
       console.warn('[AutoSolve] navigator.clipboard.readText:', e1);
@@ -447,7 +455,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           chrome.tabs.sendMessage(tab.id, { action: 'GRAB_PAGE_CONTENT' }, resolve);
         });
         if (resp && resp.text && resp.text.trim().length > 0) {
-          return resp.text.trim();
+          return removeAccessibilityCredits(resp.text).trim();
         }
       }
     } catch (e3) {
@@ -567,7 +575,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       chunks.push(text);
     }
     if (!chunks.length) throw new Error('No visible page text or dropdown content was found.');
-    const combined = chunks.join('\n\n===== EMBEDDED FRAME =====\n\n');
+    const combined = removeAccessibilityCredits(chunks.join('\n\n===== EMBEDDED FRAME =====\n\n'));
     appendLog('INFO', 'Extracted visible text from ' + chunks.length + ' frame(s), ' + combined.length.toLocaleString() + ' characters.');
     return combined;
   }
