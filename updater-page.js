@@ -16,8 +16,9 @@ function setBusy(value) {
 
 async function render() {
   $("version").textContent = "Installed version v" + chrome.runtime.getManifest().version;
-  const response = await chrome.runtime.sendMessage({ action: "CHECK_FOR_UPDATES" });
-  const info = response?.updateStatus;
+  // This page loads updater.js directly, so check GitHub here instead of
+  // depending on a background-worker message that can fail to answer.
+  const info = await AutoSolveUpdater.check(await getToken());
   const linkStatus = $("linkStatus");
   const updateStatus = $("updateStatus");
   const repoLink = $("repoLink");
@@ -30,7 +31,7 @@ async function render() {
   }
 
   if (repoLink) {
-    repoLink.href = info.githubUrl || "https://github.com/SK64HD/autosolve_ai";
+    repoLink.href = info.githubUrl || "https://github.com/Internetanyahu/autosolve_ai";
     repoLink.style.display = info.error ? "inline" : "none";
   }
 
