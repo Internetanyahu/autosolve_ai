@@ -465,12 +465,11 @@ function checkForExtensionUpdate() {
   if (updateCheckPromise) return updateCheckPromise;
 
   updateCheckPromise = (async () => {
-    const { githubFineGrainedToken, autoUpdate = true } =
-      await chrome.storage.local.get(["githubFineGrainedToken", "autoUpdate"]);
+    const { autoUpdate = true } = await chrome.storage.local.get(["autoUpdate"]);
     let update;
 
     try {
-      update = await AutoSolveUpdater.check(githubFineGrainedToken || "");
+      update = await AutoSolveUpdater.check();
     } catch (error) {
       const { autosolveUpdateStatus = {} } = await chrome.storage.local.get("autosolveUpdateStatus");
       update = {
@@ -501,8 +500,7 @@ async function applyExtensionUpdate(interactive = false) {
   if (automaticApplyPromise) return automaticApplyPromise;
 
   automaticApplyPromise = (async () => {
-    const { githubFineGrainedToken } = await chrome.storage.local.get("githubFineGrainedToken");
-    const result = await AutoSolveUpdater.apply(githubFineGrainedToken || "", { interactive });
+    const result = await AutoSolveUpdater.apply({ interactive });
     if (result.ok && result.reload) setTimeout(() => chrome.runtime.reload(), 700);
     return result;
   })().finally(() => {
