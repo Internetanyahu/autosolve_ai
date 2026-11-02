@@ -215,7 +215,7 @@ async function handleTextSolve(req) {
 
     const backendMessage = data?.error || data?.message || 'Backend did not return a usable result.';
     backendFailureMessage = backendMessage;
-    logEvent('ERROR', '[TEXT MODE] Backend solve failed; attempting direct provider fallback. HTTP ' + res.status + ': ' + backendMessage);
+    logEvent('ERROR', '[TEXT MODE] Backend solve failed. HTTP ' + res.status + ': ' + backendMessage);
   } catch (backendErr) {
     backendFailureMessage = backendErr?.message || String(backendErr);
     logEvent('ERROR', '[TEXT MODE] Backend request failed. No direct provider fallback will be attempted. ' + backendFailureMessage);
@@ -227,7 +227,7 @@ async function handleTextSolve(req) {
   throw new Error(`Backend solve failed. No direct provider retry was made to protect your API quota. ${backendFailureMessage || 'Check the backend connection and response format.'}`);
 }
 
-async function handleAutoCopyAndSolve() { {
+async function handleAutoCopyAndSolve() {
   try {
     const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!activeTab || !activeTab.id) {
