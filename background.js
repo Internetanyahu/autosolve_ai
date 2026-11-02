@@ -195,9 +195,17 @@ async function handleTextSolve(req) {
     try { data = responseText ? JSON.parse(responseText) : {}; }
     catch { data = { error: responseText.slice(0, 1000) }; }
 
-    const backendResult = data.result || data.solution;
-    if (res.ok && data.success && backendResult) {
+    let backendResult = data.result || data.solution;
+    if (typeof backendResult === 'string') {
+      // Older backend builds sometimes return the model payload as text.
+      // Recover JSON when possible; otherwise preserve the text for display.
+      backendResult = parseGeminiJson(backendResult);
+    }
+    if (res.ok && data.success && backendResult && typeof backendResult === 'object') {
       const result = normalizeAndExtractAnswers(backendResult, text);
+      if (!result.answers.length && !result.rawText && result.conciseReasoning) {
+        result.rawText = String(result.conciseReasoning);
+      }
       logEvent('COMPLETE', `[TEXT MODE] Solved via ${provider.toUpperCase()} (${result.model || data.meta?.model || ''})`);
       if (result.answers.length) {
         result.answers.forEach(ans => {
