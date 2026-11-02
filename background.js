@@ -133,12 +133,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 async function handleTextSolve(req) {
   const { text, provider = 'gemini', apiKey, model, baseUrl } = req;
   logEvent('ACTION', `[TEXT MODE] Solving question using ${provider.toUpperCase()}...`);
+  logEvent('INFO', '[DIAGNOSTIC] Background build 2026-11-02-b: TRIGGER_TEXT_SOLVE received; backend-first path enabled. Input characters: ' + String(text || '').length);
 
   // Try backend proxy first
   try {
     const serverUrl = await getServerUrl();
+    logEvent('INFO', '[TEXT MODE] Attempting backend request at ' + serverUrl + '/api/solve-text (20-second limit)...');
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
     let res;
     let data;
     try {
@@ -156,6 +158,7 @@ async function handleTextSolve(req) {
         signal: controller.signal,
       });
         const responseText = await res.text();
+        logEvent('INFO', '[TEXT MODE] Backend responded with HTTP ' + res.status + ' in ' + (Date.now() - backendStartedAt) + 'ms.');
       try { data = responseText ? JSON.parse(responseText) : {}; }
       catch { data = { error: responseText.slice(0, 1000) }; }
     } finally {
@@ -301,7 +304,7 @@ chrome.commands.onCommand.addListener(command => {
 
 async function getAvailableGeminiModels(apiKey) {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 8000);
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
   try {
     const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models?key=' + encodeURIComponent(apiKey), { signal: controller.signal });
     const data = await response.json().catch(() => ({}));
@@ -319,7 +322,7 @@ async function getAvailableGeminiModels(apiKey) {
     if (!models.length) throw new Error('Google listed no Gemini Flash models supporting generateContent for this API key.');
     return models;
   } catch (error) {
-    if (error && error.name === 'AbortError') throw new Error('Gemini model discovery timed out after 8 seconds.');
+    if (error && error.name === 'AbortError') throw new Error('Gemini model discovery timed out after 15 seconds.');
     throw error;
   } finally { clearTimeout(timeoutId); }
 }
@@ -345,7 +348,8 @@ async function queryGeminiDirectly(apiKey, prompt = '') {
     for (let attempt = 1; attempt <= 2; attempt++) {
       logEvent('INFO', `[TEXT MODE] Trying Gemini model ${model} (attempt ${attempt}/2)...`);
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      const timeoutId = setTimeout(() => controller.abort(), 25000);
+      const requestStartedAt = Date.now();
 
       try {
         const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`, {
@@ -363,6 +367,7 @@ async function queryGeminiDirectly(apiKey, prompt = '') {
           throw error;
         }
 
+        logEvent('INFO', `[TEXT MODE] Gemini ${model} returned HTTP ${response.status} in ${Date.now() - requestStartedAt}ms; reading response...`);
         const data = await response.json();
         const raw = data.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('').trim();
         if (!raw) throw new Error('Gemini returned an empty response.');
@@ -378,7 +383,7 @@ async function queryGeminiDirectly(apiKey, prompt = '') {
         return normalizeAndExtractAnswers(parsed, questionText);
       } catch (error) {
         const failure = error?.name === 'AbortError'
-          ? new Error(`Gemini model ${model} timed out after 8 seconds.`)
+          ? new Error(`Gemini model ${model} timed out after 25 seconds.`)
           : error;
         const message = String(failure?.message || failure);
         const temporary = failure?.status === 429 ||
