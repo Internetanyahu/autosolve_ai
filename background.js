@@ -140,6 +140,7 @@ async function handleTextSolve(req) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 30000);
     let res;
+    let data;
     try {
       res = await fetch(`${serverUrl}/api/solve-text`, {
         method: 'POST',
@@ -154,12 +155,12 @@ async function handleTextSolve(req) {
         }),
         signal: controller.signal,
       });
+      if (res.ok) data = await res.json();
     } finally {
       clearTimeout(timeoutId);
     }
 
     if (res.ok) {
-      const data = await res.json();
       if (data.success && data.result) {
         const result = normalizeAndExtractAnswers(data.result, text);
         logEvent('COMPLETE', `[TEXT MODE] Solved via ${provider.toUpperCase()} (${result.model || ''})`);
