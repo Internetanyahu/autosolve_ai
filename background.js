@@ -323,7 +323,7 @@ chrome.commands.onCommand.addListener(command => {
 });
 
 function parseGeminiJson(raw) {
-  const source = String(raw || '').replace(/^\\uFEFF/, '').trim();
+  const source = String(raw || '').replace(/^\uFEFF/, '').trim();
   if (!source) {
     return { conciseReasoning: 'Gemini returned an empty response.', answers: [], allChoices: [], dropdowns: [] };
   }
@@ -331,7 +331,7 @@ function parseGeminiJson(raw) {
   // Match the old server's recovery order: direct JSON, fenced JSON, then
   // the first complete JSON object embedded in surrounding text.
   const candidates = [source];
-  const fenced = source.match(/```(?:json)?\\s*([\\s\\S]*?)\\s*```/i);
+  const fenced = source.match(/\`\`\`(?:json)?\s*([\s\S]*?)\s*\`\`\`/i);
   if (fenced?.[1]) candidates.push(fenced[1].trim());
 
   const start = source.indexOf('{');
@@ -343,7 +343,7 @@ function parseGeminiJson(raw) {
       const ch = source[i];
       if (inString) {
         if (escaped) escaped = false;
-        else if (ch === '\\\\') escaped = true;
+        else if (ch === '\\') escaped = true;
         else if (ch === '"') inString = false;
       } else if (ch === '"') inString = true;
       else if (ch === '{') depth++;
