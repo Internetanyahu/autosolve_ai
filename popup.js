@@ -712,8 +712,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         responseHandled = true;
         btnSolveText.disabled = false;
         btnSolveText.textContent = 'Solve & Number Answers';
-        appendLog('ERROR', 'Solve timed out after 150 seconds. The AI provider or server did not finish responding. Check the provider status and try again.');
-      }, 150000);
+        appendLog('ERROR', 'Solve timed out after 190 seconds. The request was stopped; check the server log and selected model.');
+      }, 190000);
 
       try {
         chrome.runtime.sendMessage(
@@ -722,7 +722,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             text,
             provider,
             apiKey,
-            model: store.customModel || '',
+            model: provider === 'custom' ? (store.customModel || '') : '',
             baseUrl: store.customBaseUrl || '',
           },
           (res) => {
