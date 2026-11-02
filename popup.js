@@ -113,7 +113,11 @@ document.addEventListener('DOMContentLoaded', async () => {
           const question = ans.question
             ? `<div class="big-answer-sub">Question [${num}]: ${escapeHtml(ans.question)}</div>`
             : '';
-          return `${question}<div class="big-answer-main">👉 [${num}] ${letter}"${escapeHtml(ans.text)}"</div>`;
+          const analysis = ans.analysis
+            ? `<div class="big-answer-sub"><strong>Question [${num}] Analysis:</strong> ${escapeHtml(ans.analysis)}</div>`
+            : '';
+          const finalAnswer = `<div class="big-answer-main"><strong>FINAL ANSWER:</strong> ${letter}${escapeHtml(ans.text)}</div>`;
+          return `${question}${analysis}${finalAnswer}`;
         })
         .join('');
     } else {
@@ -192,7 +196,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         ...answer,
         number: Number.isInteger(answer.number) && answer.number > 0 ? answer.number : index + 1,
         letter: answer.letter || String.fromCharCode(65 + index),
-        text: String(answer.text || ''),
+        text: String(answer.text || (Array.isArray(answer.selections) ? answer.selections.map(item => [item.letter, item.text].filter(Boolean).join(' — ')).join('; ') : '') || ''),
+        analysis: String(answer.analysis || ''),
+        selections: Array.isArray(answer.selections) ? answer.selections : [],
         isCorrect: true,
       }));
     }
@@ -741,8 +747,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (Array.isArray(result.answers) && result.answers.length > 0) {
               result.answers.forEach((ans) => {
                 const numStr = ans.number ? `[${ans.number}]` : '[1]';
-                const letterStr = ans.letter ? `(${ans.letter}) ` : '(A) ';
-                appendLog('CLICK', `👉 ANSWER ${numStr} ${letterStr}"${ans.text}"`);
+                if (ans.analysis) {
+                  appendLog('REASONING', `Question ${numStr} Analysis: ${ans.analysis}`);
+                }
+                const letterStr = ans.letter ? `${ans.letter} — ` : '';
+                appendLog('CLICK', `FINAL ANSWER ${numStr}: ${letterStr}${ans.text}`);
               });
             }
 
