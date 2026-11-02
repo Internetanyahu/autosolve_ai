@@ -117,14 +117,9 @@
   <input type="password" id="customApiKey" placeholder="Bearer key...">
 
   <div class="section-title">API Prompt</div>
-  <label for="customPrompt">System prompt sent to the AI</label>
+  <label for="customPrompt">Additional AI instructions</label>
   <textarea id="customPrompt" rows="14" style="width:100%; box-sizing:border-box; background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:6px; padding:10px; font:12px/1.5 monospace; resize:vertical;"></textarea>
-  <p class="hint">Edit the instructions used for API requests. The default comes from prompt.txt. Your saved prompt is the only system prompt used for solving.</p>
-
-  <div class="section-title">Video Acceleration Preferences</div>
-  <label for="videoSpeed">Video Playback Rate</label>
-  <input type="number" id="videoSpeed" value="16" min="1" max="16" step="1">
-  <p class="hint">Standard speed multiplier for lecture video modules (1x to 16x).</p>
+  <p class="hint">These instructions are added to AutoSolve’s built-in solving instructions. The default comes from prompt.txt.</p>
 
 <div class="btn-row">
     <button class="btn-save" id="save-btn">Save All Settings</button>
