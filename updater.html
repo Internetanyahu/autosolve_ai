@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AutoSolve AI updates</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 24px; background: #090d16; color: #f8fafc; font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    main { max-width: 620px; margin: 0 auto; }
+    h1 { color: #38bdf8; font-size: 22px; margin: 0 0 4px; }
+    h2 { font-size: 15px; margin: 0 0 7px; }
+    .sub, .note { color: #94a3b8; font-size: 12px; }
+    .card { margin-top: 18px; padding: 18px; background: #0f172a; border: 1px solid #334155; border-radius: 9px; }
+    .steps { padding-left: 22px; }
+    .steps li { padding: 0 0 20px 4px; }
+    .steps li:last-child { padding-bottom: 0; }
+    button { border: 0; border-radius: 6px; padding: 9px 13px; font-weight: 700; cursor: pointer; color: white; }
+    button:disabled { opacity: .45; cursor: wait; }
+    .primary { background: #2563eb; }
+    .green { background: #059669; }
+    .ghost { background: #1e293b; border: 1px solid #475569; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .msg { margin-top: 8px; color: #cbd5e1; font-size: 12px; }
+    .good { color: #6ee7b7; }
+    .error { color: #fca5a5; }
+    .log { margin-top: 16px; padding: 10px; min-height: 50px; white-space: pre-wrap; overflow-wrap: anywhere; background: #030712; border: 1px solid #1e293b; border-radius: 6px; color: #cbd5e1; font: 11px/1.5 ui-monospace, monospace; }
+    label { display: flex; align-items: center; gap: 8px; margin-top: 16px; color: #cbd5e1; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>AutoSolve AI updates</h1>
+    <div class="sub" id="version">Loading installed version…</div>
+    <section class="card">
+      <p class="note">Link the exact folder you loaded with Chrome's Load unpacked button once. AutoSolve checks GitHub on startup and every 15 minutes. When the folder is linked and Chrome still grants access, available updates install automatically; you can also check or install manually here.</p>
+      <ol class="steps">
+        <li>
+          <h2>Link the installed extension folder (once)</h2>
+          <p class="note">Choose the AutoSolve AI folder containing manifest.json. Chrome will ask permission to edit that folder; allow it.</p>
+          <button id="link" class="primary">Choose extension folder</button>
+          <div id="linkStatus" class="msg">Checking…</div>
+        </li>
+        <li>
+          <h2>Install updates</h2>
+          <p class="note">Updates are only installed when you click Install update. Each downloaded file is verified before and after writing.</p>
+          <div class="row">
+            <button id="check" class="ghost">Check now</button>
+            <button id="apply" class="green">Install update</button>
+          </div>
+          <div id="updateStatus" class="msg">Checking…</div>
+          <div class="msg"><a id="repoLink" href="https://github.com/Internetanyahu/autosolve_ai" target="_blank" rel="noopener" style="color:#38bdf8;display:none;">Open AutoSolve AI on GitHub</a></div>
+        </li>
+      </ol>
+      <div class="log" id="log">Ready.</div>
+    </section>
+  </main>
+  <script src="updater.js"></script>
+  <script src="updater-page.js"></script>
+</body>
+</html>

@@ -1,0 +1,78 @@
+{
+  "manifest_version": 3,
+  "name": "AutoSolve AI - Vision Q&A & Coordinate Clicker",
+  "version": "1.0.0",
+  "description": "Captures screen, solves single & multi-choice questions using Gemini AI, simulates natural human coordinate clicks, and accelerates videos 16x with auto-next.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "tabs",
+    "debugger",
+    "sidePanel",
+    "clipboardRead",
+    "clipboardWrite"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "side_panel": {
+    "default_path": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "AutoSolve AI Controller",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": true,
+      "match_about_blank": true
+    }
+  ],
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": false
+  },
+  "commands": {
+    "auto_copy_solve": {
+      "suggested_key": {
+        "default": "Alt+Shift+C",
+        "mac": "Alt+Shift+C"
+      },
+      "description": "Auto-copy page text, paste, and solve with big green answer"
+    },
+    "trigger_autosolve": {
+      "suggested_key": {
+        "default": "Alt+Shift+S",
+        "mac": "Alt+Shift+S"
+      },
+      "description": "Scan screen and auto-solve active question"
+    },
+    "boost_video": {
+      "suggested_key": {
+        "default": "Alt+Shift+V",
+        "mac": "Alt+Shift+V"
+      },
+      "description": "Accelerate video to 16x with 15s auto-next"
+    },
+    "toggle_sidebar": {
+      "suggested_key": {
+        "default": "Alt+Shift+P",
+        "mac": "Alt+Shift+P"
+      },
+      "description": "Pop out AutoSolve AI persistent sidebar/window"
+    }
+  }
+}
