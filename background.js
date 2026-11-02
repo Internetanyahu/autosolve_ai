@@ -307,42 +307,77 @@ async function queryGeminiDirectly(apiKey, prompt = '') {
     ...(systemPrompt ? { systemInstruction: { parts: [{ text: systemPrompt }] } } : {}),
     generationConfig: { responseMimeType: 'application/json', temperature: 0.1 }
   };
-  let lastError;
-  for (const model of ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-flash-latest']) {
-    logEvent('INFO', `[TEXT MODE] Trying Gemini model ${model} (10-second limit)...`);
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
-    try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-      if (!response.ok) {
-        const detail = await response.json().catch(() => ({}));
-        throw new Error(detail.error?.message || `Gemini HTTP ${response.status}`);
-      }
-      const data = await response.json();
-      const raw = data.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('').trim();
-      if (!raw) throw new Error('Gemini returned an empty response.');
-      let parsed;
+
+  const models = ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-flash-latest'];
+  const failures = [];
+
+  for (const model of models) {
+    // Retry temporary overload/rate-limit/server errors once before changing models.
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      logEvent('INFO', `[TEXT MODE] Trying Gemini model ${model} (attempt ${attempt}/2)...`);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+
       try {
-        parsed = JSON.parse(raw);
-      } catch {
-        throw new Error('Gemini returned a response that was not valid JSON.');
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          const detail = await response.json().catch(() => ({}));
+          const message = detail.error?.message || `Gemini HTTP ${response.status}`;
+          const error = new Error(message);
+          error.status = response.status;
+          throw error;
+        }
+
+        const data = await response.json();
+        const raw = data.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('').trim();
+        if (!raw) throw new Error('Gemini returned an empty response.');
+
+        let parsed;
+        try {
+          parsed = JSON.parse(raw);
+        } catch {
+          throw new Error('Gemini returned a response that was not valid JSON.');
+        }
+
+        logEvent('INFO', `[TEXT MODE] Gemini model ${model} responded successfully.`);
+        return normalizeAndExtractAnswers(parsed, questionText);
+      } catch (error) {
+        const failure = error?.name === 'AbortError'
+          ? new Error(`Gemini model ${model} timed out after 8 seconds.`)
+          : error;
+        const message = String(failure?.message || failure);
+        const temporary = failure?.status === 429 ||
+          [500, 502, 503, 504].includes(failure?.status) ||
+          /high demand|overload|temporar(il|y)|try again later|resource exhausted|rate.?limit|unavailable/i.test(message);
+
+        failures.push(`${model}: ${message}`);
+        logEvent('INFO', `[TEXT MODE] ${model} failed: ${message}`);
+
+        if (temporary && attempt === 1) {
+          logEvent('INFO', `[TEXT MODE] Gemini appears temporarily busy; retrying ${model} once in 1.2 seconds.`);
+          await new Promise(resolve => setTimeout(resolve, 1200));
+          continue;
+        }
+        break;
+      } finally {
+        clearTimeout(timeoutId);
       }
-      return normalizeAndExtractAnswers(parsed, questionText);
-    } catch (error) {
-      lastError = error?.name === 'AbortError'
-        ? new Error(`Gemini model ${model} timed out after 10 seconds.`)
-        : error;
-      logEvent('INFO', `[TEXT MODE] ${model} failed: ${lastError.message}`);
-    } finally {
-      clearTimeout(timeoutId);
     }
   }
-  throw new Error(`All direct Gemini attempts failed. ${lastError?.message || 'Gemini request failed.'}`);
+
+  const allTemporary = failures.length > 0 && failures.every(item =>
+    /high demand|overload|temporar(il|y)|try again later|resource exhausted|rate.?limit|unavailable|HTTP (429|500|502|503|504)/i.test(item)
+  );
+  if (allTemporary) {
+    throw new Error('Gemini is temporarily overloaded or rate-limited across the available models. AutoSolve retried each model and none was available. Wait briefly and try again. Details: ' + failures.join(' | '));
+  }
+  throw new Error('All direct Gemini attempts failed. ' + (failures.join(' | ') || 'Gemini request failed.'));
 }
 
 // GitHub updater flow follows PPUSA: one branch-tree check, cached status,
