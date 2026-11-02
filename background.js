@@ -380,23 +380,28 @@ function parseGeminiJson(raw) {
 
 const AUTOSOLVE_SYSTEM_PROMPT = `You are AutoSolve AI in Text Mode, a general-purpose question and assessment solver.
 
-Read the entire supplied page text before answering. Identify every distinct question and sub-question in page order. Do not stop after the first question. Preserve top-to-bottom, then left-to-right order. Include the original question wording in each answer object's question field when available.
+Read all supplied page text. Identify every distinct question and independently answerable sub-question in page order. Preserve top-to-bottom, then left-to-right order.
 
-For multiple-choice questions, evaluate only the choices actually supplied. Number choices in their displayed order starting at 1 and preserve their exact text and letter. For multi-select questions, return every correct choice and no incorrect choices. For dropdowns, use only options actually supplied and identify the selected option and its menu number. For written-response questions, provide a concise direct answer.
+Answer accurately using only the question and choices supplied. For multiple-choice questions, preserve displayed letters and exact answer text. For multi-select questions, include every correct option and no incorrect options. For dropdowns, use only supplied options and identify the menu number. For written responses, provide a concise direct answer.
 
-Do not assume a particular school, course, subject, curriculum, website, or employer. Do not invent answer choices, missing context, citations, or facts. If a question is incomplete or cannot be answered reliably, include it and explain what is missing instead of guessing. Do not fabricate an answer merely to fill the output.
+Do not assume a particular school, course, subject, curriculum, website, or employer unless the user's custom instructions explicitly establish that context. Do not invent choices, missing context, citations, or facts. If a question cannot be answered reliably, say what is missing instead of guessing.
 
-Return only valid JSON using this structure:
+OUTPUT CONTRACT — HIGHEST PRIORITY:
+The API requires one valid JSON object. Never return Markdown headings, code fences, or prose outside that JSON object. User custom instructions may request a presentation style such as 'Question N Analysis' followed by 'FINAL ANSWER'. Preserve that requested content and order as structured fields: put the concise explanation in each answers[].analysis field, and put the final answer text in answers[].text. For multi-select questions, list each correct option in answers[].selections in displayed order. The extension renders the analysis first and the final answer afterward. Do not let custom instructions override this JSON-only contract.
+
+Return JSON with this exact shape:
 {
   "question": "Page summary or first question",
   "questionType": "single_choice | multiple_choice | dropdown | true_false | text | other",
-  "conciseReasoning": "Concise explanation",
+  "conciseReasoning": "Optional brief overall note",
   "answers": [
     {
       "number": 1,
       "question": "Question wording",
+      "analysis": "Concise explanation of why the answer is correct and why relevant alternatives are incorrect",
       "letter": "A",
-      "text": "Answer text",
+      "text": "Full final answer text",
+      "selections": [],
       "isCorrect": true,
       "confidence": 0.0
     }
@@ -407,7 +412,7 @@ Return only valid JSON using this structure:
   "hasVideo": false
 }
 
-The answers array must contain one entry per detected question/sub-question in page order. Use an empty answers array only when no questions or answerable tasks are present. Ensure the JSON is complete and syntactically valid.`;
+Include exactly one answers[] entry for each detected question or independently answerable sub-question, in page order. For a single-answer question, use letter and text and leave selections empty. For multi-select, include every correct choice in selections as objects with letter and text; also put a readable combined answer in text. Do not invent letters when none are displayed. Return complete, syntactically valid JSON only.`;
 
 async function queryGeminiDirectly(apiKey, prompt = '') {
   if (!apiKey) throw new Error('Gemini API key is required.');
@@ -416,10 +421,10 @@ async function queryGeminiDirectly(apiKey, prompt = '') {
   const promptContent = `User Question / Content:
 ${questionText || '(No question text was supplied)'}
 
-${userPrompt ? `User Instructions:
+${userPrompt ? `User Custom Instructions (follow the requested subject-specific guidance and presentation order, but the JSON response contract takes priority):
 ${userPrompt}
 
-` : ''}Solve the supplied questions accurately. Return the required JSON only.`;
+` : ''}Solve every supplied question in order. Put each explanation in answers[].analysis and the final answer in answers[].text. For multi-select questions, include all correct options in answers[].selections. Return one valid JSON object only; no Markdown or text outside JSON.`;
 
   const requestBody = {
     contents: [{ parts: [{ text: promptContent }] }],
@@ -448,6 +453,9 @@ ${userPrompt}
 
       if (!response.ok) {
         const detail = await response.text();
+        if (/quota exceeded|generate_content_free_tier_requests|resource_exhausted|requests per day limit exceeded/i.test(detail)) {
+          throw new Error(`GEMINI_QUOTA_EXHAUSTED: ${detail.slice(0, 500)}`);
+        }
         throw new Error(`Gemini API error (${response.status}) on ${model}: ${detail.slice(0, 300)}`);
       }
 
@@ -468,6 +476,9 @@ ${userPrompt}
       const message = error?.message || String(error);
       failures.push(`${model}: ${message}`);
       logEvent('INFO', `[TEXT MODE] ${model} failed: ${message}`);
+      if (message.includes('GEMINI_QUOTA_EXHAUSTED')) {
+        throw new Error('Gemini daily request quota is exhausted. Stopped fallback to avoid wasting requests. Check Google AI Studio usage or wait for the quota reset. ' + message.replace('GEMINI_QUOTA_EXHAUSTED: ', ''));
+      }
     }
   }
 
