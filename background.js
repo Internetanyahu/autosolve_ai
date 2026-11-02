@@ -186,6 +186,7 @@ async function handleTextSolve(req) {
     const res = await fetch(`${serverUrl}/api/solve-text`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(185_000),
       body: JSON.stringify({ text, provider, apiKey, model, baseUrl, userPrompt }),
     });
 
@@ -269,7 +270,7 @@ async function handleAutoCopyAndSolve() {
         text: pageText,
         provider: config.provider,
         apiKey: config.apiKey,
-        model: config.customModel,
+        model: config.provider === 'custom' ? config.customModel : '',
         baseUrl: config.customBaseUrl,
       });
     });
