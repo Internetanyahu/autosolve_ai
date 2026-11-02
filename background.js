@@ -137,18 +137,26 @@ async function handleTextSolve(req) {
   // Try backend proxy first
   try {
     const serverUrl = await getServerUrl();
-    const res = await fetch(`${serverUrl}/api/solve-text`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        text,
-        provider,
-        apiKey,
-        model,
-        baseUrl,
-        systemPrompt: await getCustomPrompt(),
-      }),
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    let res;
+    try {
+      res = await fetch(`${serverUrl}/api/solve-text`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text,
+          provider,
+          apiKey,
+          model,
+          baseUrl,
+          systemPrompt: await getCustomPrompt(),
+        }),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     if (res.ok) {
       const data = await res.json();
@@ -285,29 +293,49 @@ chrome.commands.onCommand.addListener(command => {
   });
 });
 
-// Text-only Gemini fallback.
-async function queryGeminiDirectly(base64Image, apiKey, prompt = '') {
+// Text-only Gemini fallback. Each model request is bounded so a stalled
+// provider cannot leave the extension waiting forever.
+async function queryGeminiDirectly(apiKey, prompt = '') {
+  if (!apiKey) throw new Error('Gemini API key is required.');
+  const questionText = String(prompt || '');
   const systemPrompt = await getCustomPrompt();
   const body = {
-    contents: [{ parts: [{ text: String(prompt || '') }] }],
+    contents: [{ role: 'user', parts: [{ text: questionText }] }],
     ...(systemPrompt ? { systemInstruction: { parts: [{ text: systemPrompt }] } } : {}),
     generationConfig: { responseMimeType: 'application/json', temperature: 0.1 }
   };
   let lastError;
   for (const model of ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-flash-latest']) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
     try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: controller.signal,
       });
       if (!response.ok) {
         const detail = await response.json().catch(() => ({}));
-        throw new Error(detail.error?.message || `HTTP ${response.status}`);
+        throw new Error(detail.error?.message || `Gemini HTTP ${response.status}`);
       }
       const data = await response.json();
-      const raw = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      const raw = data.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('').trim();
       if (!raw) throw new Error('Gemini returned an empty response.');
-      return normalizeAndExtractAnswers(JSON.parse(raw), prompt);
-    } catch (error) { lastError = error; }
+      let parsed;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        throw new Error('Gemini returned a response that was not valid JSON.');
+      }
+      return normalizeAndExtractAnswers(parsed, questionText);
+    } catch (error) {
+      lastError = error?.name === 'AbortError'
+        ? new Error(`Gemini model ${model} timed out after 20 seconds.`)
+        : error;
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
   throw lastError || new Error('Gemini request failed.');
 }
