@@ -155,13 +155,14 @@ async function handleTextSolve(req) {
         }),
         signal: controller.signal,
       });
-      if (res.ok) data = await res.json();
+        const responseText = await res.text();
+      try { data = responseText ? JSON.parse(responseText) : {}; }
+      catch { data = { error: responseText.slice(0, 1000) }; }
     } finally {
       clearTimeout(timeoutId);
     }
 
-    if (res.ok) {
-      if (data.success && data.result) {
+    if (res.ok && data.success && data.result) {
         const result = normalizeAndExtractAnswers(data.result, text);
         logEvent('COMPLETE', `[TEXT MODE] Solved via ${provider.toUpperCase()} (${result.model || ''})`);
         
@@ -183,11 +184,14 @@ async function handleTextSolve(req) {
         }
 
         return { success: true, result };
-      }
     }
+    const backendMessage = data?.error || data?.message || (data?.success === false ? 'Backend returned success=false without an error message.' : '');
+    logEvent('ERROR', '[TEXT MODE] Backend solve failed; attempting direct ' + provider.toUpperCase() + ' fallback. HTTP ' + res.status + (backendMessage ? ': ' + backendMessage : ''));
+    console.warn('[AutoSolve AI] Backend solve failed; attempting direct provider fallback.', { status: res.status, response: data });
   } catch (backendErr) {
-    logEvent('INFO', `[TEXT MODE] Backend did not respond; switching to direct ${provider.toUpperCase()} API (${backendErr?.name === 'AbortError' ? '15-second timeout' : backendErr.message}).`);
-    console.warn('[AutoSolve AI] Backend proxy unavailable, attempting direct fetch...', backendErr);
+    const detail = backendErr?.name === 'AbortError' ? '15-second timeout' : (backendErr?.message || String(backendErr));
+    logEvent('ERROR', '[TEXT MODE] Backend request failed; switching to direct ' + provider.toUpperCase() + ' API. ' + detail);
+    console.warn('[AutoSolve AI] Backend request failed; attempting direct provider fallback...', backendErr);
   }
 
   // Direct client fetch for Gemini if backend is down
@@ -295,6 +299,30 @@ chrome.commands.onCommand.addListener(command => {
   });
 });
 
+async function getAvailableGeminiModels(apiKey) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
+  try {
+    const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models?key=' + encodeURIComponent(apiKey), { signal: controller.signal });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error?.message || ('Gemini model discovery failed (HTTP ' + response.status + ').'));
+    const preferred = ['gemini-3.5-flash-lite', 'gemini-3.8-flash'];
+    const models = (data.models || []).filter(item =>
+      Array.isArray(item.supportedGenerationMethods) && item.supportedGenerationMethods.includes('generateContent') &&
+      /^models\/gemini-.*flash/i.test(item.name || '')
+    ).map(item => String(item.name).replace(/^models\//, ''));
+    models.sort((a, b) => {
+      const ai = preferred.indexOf(a), bi = preferred.indexOf(b);
+      if (ai !== -1 || bi !== -1) return ai === -1 ? 1 : bi === -1 ? -1 : ai - bi;
+      return (a.includes('latest') ? 0 : 1) - (b.includes('latest') ? 0 : 1) || a.localeCompare(b);
+    });
+    if (!models.length) throw new Error('Google listed no Gemini Flash models supporting generateContent for this API key.');
+    return models;
+  } catch (error) {
+    if (error && error.name === 'AbortError') throw new Error('Gemini model discovery timed out after 8 seconds.');
+    throw error;
+  } finally { clearTimeout(timeoutId); }
+}
 // Text-only Gemini fallback. Each model request is bounded so a stalled
 // provider cannot leave the extension waiting forever.
 async function queryGeminiDirectly(apiKey, prompt = '') {
@@ -308,10 +336,11 @@ async function queryGeminiDirectly(apiKey, prompt = '') {
     generationConfig: { responseMimeType: 'application/json', temperature: 0.1 }
   };
 
-  const models = ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-flash-latest'];
+  const models = await getAvailableGeminiModels(apiKey);
+  logEvent('INFO', '[TEXT MODE] Google reports available Flash models: ' + models.join(', '));
   const failures = [];
 
-  for (const model of models) {
+  for (const model of models.slice(0, 4)) {
     // Retry temporary overload/rate-limit/server errors once before changing models.
     for (let attempt = 1; attempt <= 2; attempt++) {
       logEvent('INFO', `[TEXT MODE] Trying Gemini model ${model} (attempt ${attempt}/2)...`);
@@ -403,7 +432,7 @@ function checkForExtensionUpdate() {
         ...autosolveUpdateStatus,
         currentVersion: chrome.runtime.getManifest().version,
         checkedAt: new Date().toISOString(),
-        githubUrl: "https://github.com/SK64HD/autosolve_ai",
+        githubUrl: "https://github.com/Internetanyahu/autosolve_ai",
         error: error?.message || "GitHub update check failed."
       };
     }
