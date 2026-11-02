@@ -138,7 +138,7 @@ async function handleTextSolve(req) {
   try {
     const serverUrl = await getServerUrl();
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
     let res;
     let data;
     try {
@@ -186,6 +186,7 @@ async function handleTextSolve(req) {
       }
     }
   } catch (backendErr) {
+    logEvent('INFO', `[TEXT MODE] Backend did not respond; switching to direct ${provider.toUpperCase()} API (${backendErr?.name === 'AbortError' ? '15-second timeout' : backendErr.message}).`);
     console.warn('[AutoSolve AI] Backend proxy unavailable, attempting direct fetch...', backendErr);
   }
 
@@ -299,6 +300,7 @@ chrome.commands.onCommand.addListener(command => {
 async function queryGeminiDirectly(apiKey, prompt = '') {
   if (!apiKey) throw new Error('Gemini API key is required.');
   const questionText = String(prompt || '');
+  logEvent('INFO', '[TEXT MODE] Preparing direct Gemini request...');
   const systemPrompt = await getCustomPrompt();
   const body = {
     contents: [{ role: 'user', parts: [{ text: questionText }] }],
@@ -307,8 +309,9 @@ async function queryGeminiDirectly(apiKey, prompt = '') {
   };
   let lastError;
   for (const model of ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-flash-latest']) {
+    logEvent('INFO', `[TEXT MODE] Trying Gemini model ${model} (10-second limit)...`);
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000);
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
     try {
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`, {
         method: 'POST',
@@ -332,13 +335,14 @@ async function queryGeminiDirectly(apiKey, prompt = '') {
       return normalizeAndExtractAnswers(parsed, questionText);
     } catch (error) {
       lastError = error?.name === 'AbortError'
-        ? new Error(`Gemini model ${model} timed out after 20 seconds.`)
+        ? new Error(`Gemini model ${model} timed out after 10 seconds.`)
         : error;
+      logEvent('INFO', `[TEXT MODE] ${model} failed: ${lastError.message}`);
     } finally {
       clearTimeout(timeoutId);
     }
   }
-  throw lastError || new Error('Gemini request failed.');
+  throw new Error(`All direct Gemini attempts failed. ${lastError?.message || 'Gemini request failed.'}`);
 }
 
 // GitHub updater flow follows PPUSA: one branch-tree check, cached status,
