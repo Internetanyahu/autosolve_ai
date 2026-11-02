@@ -139,6 +139,7 @@ async function handleTextSolve(req) {
   try {
     const serverUrl = await getServerUrl();
     logEvent('INFO', '[TEXT MODE] Attempting backend request at ' + serverUrl + '/api/solve-text (20-second limit)...');
+    const backendStartedAt = Date.now();
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 20000);
     let res;
@@ -192,7 +193,7 @@ async function handleTextSolve(req) {
     logEvent('ERROR', '[TEXT MODE] Backend solve failed; attempting direct ' + provider.toUpperCase() + ' fallback. HTTP ' + res.status + (backendMessage ? ': ' + backendMessage : ''));
     console.warn('[AutoSolve AI] Backend solve failed; attempting direct provider fallback.', { status: res.status, response: data });
   } catch (backendErr) {
-    const detail = backendErr?.name === 'AbortError' ? '15-second timeout' : (backendErr?.message || String(backendErr));
+    const detail = backendErr?.name === 'AbortError' ? '20-second timeout' : (backendErr?.message || String(backendErr));
     logEvent('ERROR', '[TEXT MODE] Backend request failed; switching to direct ' + provider.toUpperCase() + ' API. ' + detail);
     console.warn('[AutoSolve AI] Backend request failed; attempting direct provider fallback...', backendErr);
   }
