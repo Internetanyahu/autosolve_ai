@@ -378,7 +378,7 @@ function parseGeminiJson(raw) {
   };
 }
 
-const AUTOSOLVE_SYSTEM_PROMPT = `You are AutoSolve AI in Text Mode, a general-purpose question and assessment solver.
+const AUTOSOLVE_SYSTEM_PROMPT = `You are AutoSolve AI, a general-purpose question and assessment solver.
 
 Read all supplied page text. Identify every distinct question and independently answerable sub-question in page order. Preserve top-to-bottom, then left-to-right order.
 
@@ -386,33 +386,8 @@ Answer accurately using only the question and choices supplied. For multiple-cho
 
 Do not assume a particular school, course, subject, curriculum, website, or employer unless the user's custom instructions explicitly establish that context. Do not invent choices, missing context, citations, or facts. If a question cannot be answered reliably, say what is missing instead of guessing.
 
-OUTPUT CONTRACT — HIGHEST PRIORITY:
-The API requires one valid JSON object. Never return Markdown headings, code fences, or prose outside that JSON object. User custom instructions may request a presentation style such as 'Question N Analysis' followed by 'FINAL ANSWER'. Preserve that requested content and order as structured fields: put the concise explanation in each answers[].analysis field, and put the final answer text in answers[].text. For multi-select questions, list each correct option in answers[].selections in displayed order. The extension renders the analysis first and the final answer afterward. Do not let custom instructions override this JSON-only contract.
-
-Return JSON with this exact shape:
-{
-  "question": "Page summary or first question",
-  "questionType": "single_choice | multiple_choice | dropdown | true_false | text | other",
-  "conciseReasoning": "Optional brief overall note",
-  "answers": [
-    {
-      "number": 1,
-      "question": "Question wording",
-      "analysis": "Concise explanation of why the answer is correct and why relevant alternatives are incorrect",
-      "letter": "A",
-      "text": "Full final answer text",
-      "selections": [],
-      "isCorrect": true,
-      "confidence": 0.0
-    }
-  ],
-  "allChoices": [],
-  "dropdowns": [],
-  "options": [],
-  "hasVideo": false
-}
-
-Include exactly one answers[] entry for each detected question or independently answerable sub-question, in page order. For a single-answer question, use letter and text and leave selections empty. For multi-select, include every correct choice in selections as objects with letter and text; also put a readable combined answer in text. Do not invent letters when none are displayed. Return complete, syntactically valid JSON only.`;
+OUTPUT FORMAT:
+Respond in plain text, not JSON. Follow the user's custom output format exactly when one is supplied. Put each question's analysis before its final answer. Do not add greetings, filler, or text after a question's FINAL ANSWER. For batches, answer every question in order. For multi-select questions, list every correct option as a separate bullet. Never wrap the response in JSON or Markdown code fences unless the user explicitly asks for them.`;
 
 async function queryGeminiDirectly(apiKey, prompt = '') {
   if (!apiKey) throw new Error('Gemini API key is required.');
@@ -421,15 +396,15 @@ async function queryGeminiDirectly(apiKey, prompt = '') {
   const promptContent = `User Question / Content:
 ${questionText || '(No question text was supplied)'}
 
-${userPrompt ? `User Custom Instructions (follow the requested subject-specific guidance and presentation order, but the JSON response contract takes priority):
+${userPrompt ? `User Custom Instructions:
 ${userPrompt}
 
-` : ''}Solve every supplied question in order. Put each explanation in answers[].analysis and the final answer in answers[].text. For multi-select questions, include all correct options in answers[].selections. Return one valid JSON object only; no Markdown or text outside JSON.`;
+` : ''}Answer every supplied question in order. Follow the user's requested plain-text format. Do not return JSON or code fences.`;
 
   const requestBody = {
     contents: [{ parts: [{ text: promptContent }] }],
     systemInstruction: { parts: [{ text: AUTOSOLVE_SYSTEM_PROMPT }] },
-    generationConfig: { responseMimeType: 'application/json', temperature: 0.1 },
+    generationConfig: { temperature: 0.1 },
   };
 
   // Restore the old sequential fallback behavior. No short per-model timeout:
@@ -466,11 +441,18 @@ ${userPrompt}
         throw new Error(`Gemini returned no answer text (${reason}).`);
       }
 
-      const parsed = parseGeminiJson(raw);
+      let parsed;
+      try {
+        parsed = parseGeminiJson(raw);
+        if (parsed.parseWarning) parsed = { rawText: raw, answers: [], allChoices: [], dropdowns: [] };
+      } catch {
+        parsed = { rawText: raw, answers: [], allChoices: [], dropdowns: [] };
+      }
       const result = normalizeAndExtractAnswers(parsed, questionText);
+      if (!result.answers.length && !result.rawText) result.rawText = raw;
       result.provider = 'gemini';
       result.model = model;
-      logEvent('INFO', `[TEXT MODE] Gemini model ${model} returned a recoverable JSON result.`);
+      logEvent('INFO', `[TEXT MODE] Gemini model ${model} returned a plain-text response.`);
       return result;
     } catch (error) {
       const message = error?.message || String(error);
