@@ -3,13 +3,11 @@
 (() => {
   // Remove Edgenuity navigation, accessibility help, and page chrome before
   // copying text to the solver. Keep question wording and answer choices intact.
-function removeAccessibilityCredits(value) {
-  return String(value || '')
-    .replace(/(?:^|[\\r\\n])\\s*Credits\\\\?[\\s\\S]*?trash icon in the highlighter menu to delete it\\.?\\\\?\\s*EN\\\\?(?=$|[\\r\\n])/i, '\\n')
-    .replace(/\\u00a0/g, ' ')
-    .replace(/[ \\t]+\\n/g, '\\n')
-    .replace(/\\n{3,}/g, '\\n\\n')
-    .trim();
+  function removeAccessibilityCredits(value) {
+  return String(value || '').replace(
+    /Credits\\?[\s\S]*?trash icon in the highlighter menu to delete it\.?\\?\s*EN\\?/i,
+    ''
+  );
 }
 
   const UI_NOISE_PATTERNS = [
@@ -28,7 +26,7 @@ function removeAccessibilityCredits(value) {
     /^to highlight with the keyboard:.*remove a highlight:.*$/i,
   ];
 
-  const clean = value => String(value || '')
+  const clean = value => removeAccessibilityCredits(String(value || ''))
     .replace(/\u00a0/g, ' ')
     .split(/\r?\n/)
     .map(line => line.trim())
