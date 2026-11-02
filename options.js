@@ -113,32 +113,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     showStatus(`Verifying ${activeProvider.toUpperCase()} API key online...`);
 
-    // 1. Try server verification first
-    try {
-      const res = await fetch('/api/verify-key', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider: activeProvider,
-          apiKey: targetKey,
-          baseUrl: customBaseUrlInput.value.trim(),
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.valid) {
-          showStatus(`✓ ${activeProvider.toUpperCase()} Key Verified & Online! Latency: ${data.latencyMs}ms`);
-          return;
-        } else {
-          showStatus(`✗ Key Verification Failed: ${data.error || 'Authentication rejected'}`, true);
-          return;
-        }
-      }
-    } catch {
-      // Proceed to direct ping
-    }
-
-    // 2. Direct browser verification
+    // Verify the key directly with the selected provider; never call the hosted app backend.
+    // Direct provider verification
     try {
       if (activeProvider === 'gemini') {
         const availableModels = await discoverGeminiModelsForKey(targetKey);

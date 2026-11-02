@@ -234,41 +234,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     statusBadge.innerHTML = `<span style="color:#eab308;">⟳ Testing ${provider.toUpperCase()}...</span>`;
-    statusBadge.title = 'Verifying key validity with server & provider...';
+    statusBadge.title = 'Checking the selected provider directly; no hosted backend is used.';
 
-    // 1. Try backend verification endpoint first
-    try {
-      const serverUrl = await getServerUrl();
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 6000);
-      const res = await fetch(`${serverUrl}/api/verify-key`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider, apiKey: key }),
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
-
-      if (res.ok) {
-        const data = await res.json();
-        if (data.valid) {
-          statusBadge.innerHTML = `<span style="color:#10b981;">● ${provider.toUpperCase()} Online (${data.latencyMs || 0}ms)</span>`;
-          statusBadge.title = `Valid & online (${data.latencyMs || 0}ms). Click to re-test.`;
-          appendLog('INFO', `${provider.toUpperCase()} API key verified online (${data.latencyMs || 0}ms).`);
-          return true;
-        } else {
-          const cleanErr = (data.error || 'Invalid key').slice(0, 24);
-          statusBadge.innerHTML = `<span style="color:#ef4444;">● Invalid Key (${cleanErr})</span>`;
-          statusBadge.title = data.error || 'Invalid API Key';
-          appendLog('ERROR', `${provider.toUpperCase()} key error: ${data.error}`);
-          return false;
-        }
-      }
-    } catch {
-      // Backend unavailable; proceed to direct browser verification fallback
-    }
-
-    // 2. Direct browser verification fallback
+    // Verify directly against the selected provider
     try {
       const startTime = Date.now();
       if (provider === 'gemini') {
@@ -712,7 +680,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         responseHandled = true;
         btnSolveText.disabled = false;
         btnSolveText.textContent = 'Solve & Number Answers';
-        appendLog('ERROR', 'Solve timed out after 190 seconds. The request was stopped; check the server log and selected model.');
+        appendLog('ERROR', 'Provider request timed out after 190 seconds. Check the selected provider, model, and API quota.');
       }, 190000);
 
       try {
