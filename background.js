@@ -305,7 +305,7 @@ chrome.commands.onCommand.addListener(command => {
 
 async function getAvailableGeminiModels(apiKey) {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 15000);
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
   try {
     const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models?key=' + encodeURIComponent(apiKey), { signal: controller.signal });
     const data = await response.json().catch(() => ({}));
@@ -323,10 +323,55 @@ async function getAvailableGeminiModels(apiKey) {
     if (!models.length) throw new Error('Google listed no Gemini Flash models supporting generateContent for this API key.');
     return models;
   } catch (error) {
-    if (error && error.name === 'AbortError') throw new Error('Gemini model discovery timed out after 15 seconds.');
+    if (error && error.name === 'AbortError') throw new Error('Gemini model discovery timed out after 8 seconds.');
     throw error;
   } finally { clearTimeout(timeoutId); }
 }
+function parseGeminiJson(raw) {
+  const text = String(raw || '').replace(/^\uFEFF/, '').trim();
+  if (!text) throw new Error('Gemini returned an empty response.');
+
+  const candidates = [];
+  const unfenced = text
+    .replace(/^\s*```(?:json)?\s*/i, '')
+    .replace(/\s*```\s*$/i, '')
+    .trim();
+  candidates.push(unfenced);
+
+  // Models sometimes add a short sentence before or after an otherwise valid JSON object.
+  const start = unfenced.indexOf('{');
+  if (start !== -1) {
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let i = start; i < unfenced.length; i++) {
+      const ch = unfenced[i];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (ch === '\\\\') escaped = true;
+        else if (ch === '"') inString = false;
+        continue;
+      }
+      if (ch === '"') inString = true;
+      else if (ch === '{') depth++;
+      else if (ch === '}' && --depth === 0) {
+        candidates.push(unfenced.slice(start, i + 1));
+        break;
+      }
+    }
+  }
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed)) return { answers: parsed };
+    } catch {}
+  }
+
+  throw new Error('Gemini response was not parseable JSON. Response excerpt: ' + text.slice(0, 240));
+}
+
 // Text-only Gemini fallback. Each model request is bounded so a stalled
 // provider cannot leave the extension waiting forever.
 async function queryGeminiDirectly(apiKey, prompt = '') {
@@ -344,12 +389,12 @@ async function queryGeminiDirectly(apiKey, prompt = '') {
   logEvent('INFO', '[TEXT MODE] Google reports available Flash models: ' + models.join(', '));
   const failures = [];
 
-  for (const model of models.slice(0, 4)) {
-    // Retry temporary overload/rate-limit/server errors once before changing models.
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      logEvent('INFO', `[TEXT MODE] Trying Gemini model ${model} (attempt ${attempt}/2)...`);
+  for (const model of models.slice(0, 3)) {
+    // Move to the next model immediately when one is slow or overloaded.
+    for (let attempt = 1; attempt <= 1; attempt++) {
+      logEvent('INFO', `[TEXT MODE] Trying Gemini model ${model} (attempt ${attempt}/1)...`);
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 25000);
+      const timeoutId = setTimeout(() => controller.abort(), 12000);
       const requestStartedAt = Date.now();
 
       try {
@@ -373,18 +418,16 @@ async function queryGeminiDirectly(apiKey, prompt = '') {
         const raw = data.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('').trim();
         if (!raw) throw new Error('Gemini returned an empty response.');
 
-        let parsed;
-        try {
-          parsed = JSON.parse(raw);
-        } catch {
-          throw new Error('Gemini returned a response that was not valid JSON.');
+        const parsed = parseGeminiJson(raw);
+        if (!Array.isArray(parsed.answers)) {
+          throw new Error('Gemini JSON did not contain an answers array.');
         }
 
         logEvent('INFO', `[TEXT MODE] Gemini model ${model} responded successfully.`);
         return normalizeAndExtractAnswers(parsed, questionText);
       } catch (error) {
         const failure = error?.name === 'AbortError'
-          ? new Error(`Gemini model ${model} timed out after 25 seconds.`)
+          ? new Error(`Gemini model ${model} timed out after 12 seconds.`)
           : error;
         const message = String(failure?.message || failure);
         const temporary = failure?.status === 429 ||
@@ -394,10 +437,8 @@ async function queryGeminiDirectly(apiKey, prompt = '') {
         failures.push(`${model}: ${message}`);
         logEvent('INFO', `[TEXT MODE] ${model} failed: ${message}`);
 
-        if (temporary && attempt === 1) {
-          logEvent('INFO', `[TEXT MODE] Gemini appears temporarily busy; retrying ${model} once in 1.2 seconds.`);
-          await new Promise(resolve => setTimeout(resolve, 1200));
-          continue;
+        if (temporary) {
+          logEvent('INFO', `[TEXT MODE] ${model} is temporarily unavailable; moving to the next model.`);
         }
         break;
       } finally {
