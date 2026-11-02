@@ -129,7 +129,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 });
  
 // Text Mode Q&A Handler.
- (Strictly passive: No screen interactions, no mouse clicks)
+ // Strictly passive: No screen interactions, no mouse clicks.
 async function handleTextSolve(req) {
   const { text, provider = 'gemini', apiKey, model, baseUrl } = req;
   logEvent('ACTION', `[TEXT MODE] Solving question using ${provider.toUpperCase()}...`);
