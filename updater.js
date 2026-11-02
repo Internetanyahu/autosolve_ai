@@ -9,7 +9,7 @@
 (() => {
   if (self.AutoSolveUpdater) return;
 
-  const REPO = "SK64HD/autosolve_ai";
+  const REPO = "Internetanyahu/autosolve_ai";
   const BRANCH = "main";
   const EXPECTED_NAME = "AutoSolve AI - Text Q&A";
   const API = "https://api.github.com/repos/" + REPO;
@@ -46,37 +46,52 @@
       "Accept": "application/vnd.github+json",
       "X-GitHub-Api-Version": "2022-11-28"
     };
-    if (token) headers.Authorization = "Bearer " + String(token).trim();
+    const activeToken = String(token || "").trim();
+    if (activeToken) headers.Authorization = "Bearer " + activeToken;
 
-    let response = await fetch(API + path, {
-      headers,
-      cache: "no-store"
-    });
-
-    // This repository is public. If a saved token is invalid, retry without
-    // authentication instead of letting a bad optional token block updates.
-    if (response.status === 401 && token) {
-      response = await fetch(API + path, {
-        headers: {
-          "Accept": "application/vnd.github+json",
-          "X-GitHub-Api-Version": "2022-11-28"
-        },
-        cache: "no-store"
+    // A stalled GitHub request must never leave the updater in "Checking…".
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 12000);
+    try {
+      let response = await fetch(API + path, {
+        headers,
+        cache: "no-store",
+        signal: controller.signal
       });
-    }
 
-    if (!response.ok) {
-      const detail = await response.json().catch(() => ({}));
-      const reason = detail.message ? ": " + detail.message : "";
-      if (response.status === 401 || response.status === 403) {
-        throw new Error("GitHub API access failed (" + response.status + ")" + reason);
+      // The repository is public. If an optional saved token is invalid,
+      // retry anonymously rather than blocking the update check.
+      if (response.status === 401 && activeToken) {
+        response = await fetch(API + path, {
+          headers: {
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28"
+          },
+          cache: "no-store",
+          signal: controller.signal
+        });
       }
-      if (response.status === 404) {
-        throw new Error("Repository or branch not found (404). Check that " + REPO + " is public and the branch exists.");
+
+      if (!response.ok) {
+        const detail = await response.json().catch(() => ({}));
+        const reason = detail.message ? ": " + detail.message : "";
+        if (response.status === 401 || response.status === 403) {
+          throw new Error("GitHub API access failed (" + response.status + ")" + reason);
+        }
+        if (response.status === 404) {
+          throw new Error("Repository or branch not found (404). Check that " + REPO + " is public and the branch exists.");
+        }
+        throw new Error("GitHub request failed (" + response.status + ")" + reason);
       }
-      throw new Error("GitHub request failed (" + response.status + ")" + reason);
+      return await response.json();
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        throw new Error("GitHub did not respond within 12 seconds. Check your connection and try again.");
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
     }
-    return response.json();
   }
   async function remoteExtensionSha(token) {
     // The Git Trees API accepts a branch name directly. This is the same
