@@ -25,18 +25,6 @@ Keep the original folder in the same location. If Chrome revokes folder permissi
 - Paste question text or use **Auto-Copy Page & Solve**.
 - AutoSolve processes the entire supplied text and returns answers in page order.
 - It does not click answer choices or automatically advance the page.
-- The editable instructions in Full Settings are sent to the backend with each solve request.
+- The editable instructions in Full Settings are added to the built-in solving instructions; they do not replace the core JSON/output requirements.
 
 API keys and preferences are stored in the browser's extension storage and are not included in repository files.
-
-## Backend
-
-The standalone API source is in `backend/`.
-
-- `GET /api/status` checks service availability.
-- `POST /api/solve-text` routes a text-solving request to Gemini, OpenAI, Anthropic, DeepSeek, or a custom OpenAI-compatible endpoint.
-- Provider API keys are supplied by the extension per request and are not stored or logged by the backend.
-- The backend makes one model request per solve. It does not rotate through fallback model IDs after quota or response errors.
-- JSON output is parsed; plain-text output is preserved for the extension to display.
-
-The extension currently points to the existing Cloud Run URL. Adding backend source to GitHub does not deploy it or change that live service. The included `backend/Dockerfile` can be used to deploy the new source to Cloud Run when deployment credentials and service settings are configured.
