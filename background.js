@@ -174,20 +174,7 @@ async function handleTextSolve(req) {
   logEvent('ACTION', `[TEXT MODE] Solving question using ${provider.toUpperCase()}...`);
   logEvent('INFO', '[DIAGNOSTIC] TRIGGER_TEXT_SOLVE received. Input characters: ' + String(text || '').length);
 
-  // Gemini is called directly from the extension. The hosted backend has a
-  // legacy JSON-only parser that rejects valid plain-text generations.
-  if (provider === 'gemini') {
-    const key = apiKey || await getGeminiApiKey();
-    if (!key) throw new Error('Gemini API key is required. Please paste your key in the popup.');
-    const result = await queryGeminiDirectly(key, text || '');
-    if (Array.isArray(result.answers) && result.answers.length) {
-      result.answers.forEach(ans => logEvent('CLICK', `ANSWER [${ans.number}] (${ans.letter}) "${ans.text}"`));
-    }
-    if (result.rawText) logEvent('REASONING', result.rawText);
-    else if (result.conciseReasoning) logEvent('REASONING', result.conciseReasoning);
-    logEvent('COMPLETE', `[TEXT MODE] Solved directly with Gemini (${result.model || 'Gemini API'}).`);
-    return { success: true, result };
-  }
+  let backendFailureMessage = '';
 
   // Match the older working backend contract: allow the server to finish and
   // send the editable prompt as userPrompt (the field its route accepts).
@@ -227,34 +214,20 @@ async function handleTextSolve(req) {
     }
 
     const backendMessage = data?.error || data?.message || 'Backend did not return a usable result.';
+    backendFailureMessage = backendMessage;
     logEvent('ERROR', '[TEXT MODE] Backend solve failed; attempting direct provider fallback. HTTP ' + res.status + ': ' + backendMessage);
   } catch (backendErr) {
-    logEvent('ERROR', '[TEXT MODE] Backend request failed; attempting direct ' + provider.toUpperCase() + ' fallback. ' + (backendErr?.message || String(backendErr)));
+    backendFailureMessage = backendErr?.message || String(backendErr);
+    logEvent('ERROR', '[TEXT MODE] Backend request failed. No direct provider fallback will be attempted. ' + backendFailureMessage);
   }
 
-  // Direct client fetch for Gemini if backend is down
-  if (provider === 'gemini') {
-    const key = apiKey || await getGeminiApiKey();
-    if (!key) throw new Error('Gemini API key is required. Please paste your key in the popup.');
-    const result = await queryGeminiDirectly(key, text || '');
-
-    if (Array.isArray(result.answers) && result.answers.length > 0) {
-      result.answers.forEach((ans) => {
-        const numStr = ans.number ? `[${ans.number}]` : '[1]';
-        const letterStr = ans.letter ? `(${ans.letter}) ` : '(A) ';
-        logEvent('CLICK', `👉 ANSWER ${numStr} ${letterStr}"${ans.text}"`);
-      });
-    }
-    if (result.conciseReasoning) {
-      logEvent('REASONING', result.conciseReasoning);
-    }
-    return { success: true, result };
-  }
-
-  throw new Error(`Provider "${provider}" could not be reached. Ensure the AutoSolve server is online or check your API key.`);
+  // Do not automatically call Gemini directly after a backend failure.
+  // The backend is the configured model router; direct retries can consume
+  // the user's separate Google AI Studio daily quota.
+  throw new Error(`Backend solve failed. No direct provider retry was made to protect your API quota. ${backendFailureMessage || 'Check the backend connection and response format.'}`);
 }
 
-async function handleAutoCopyAndSolve() {
+async function handleAutoCopyAndSolve() { {
   try {
     const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!activeTab || !activeTab.id) {
