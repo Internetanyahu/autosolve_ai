@@ -80,6 +80,21 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   };
 
+  async function discoverGeminiModelsForKey(key) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    try {
+      const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models?key=' + encodeURIComponent(key), { signal: controller.signal });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error?.message || ('HTTP ' + response.status));
+      const models = (data.models || []).filter(model => Array.isArray(model.supportedGenerationMethods) && model.supportedGenerationMethods.includes('generateContent') && /^models\/gemini-.*flash/i.test(model.name || '')).map(model => model.name.replace(/^models\//, ''));
+      if (!models.length) throw new Error('Google listed no Gemini Flash models supporting text generation for this key.');
+      return models;
+    } catch (error) {
+      if (error && error.name === 'AbortError') throw new Error('Google model-list request timed out after 8 seconds.');
+      throw error;
+    } finally { clearTimeout(timeoutId); }
+  }
   testBtn.onclick = async () => {
     const activeProvider = providerSelect ? providerSelect.value : 'gemini';
     const geminiKey = geminiKeyInput.value.trim();
@@ -133,30 +148,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // 2. Direct browser verification
     try {
       if (activeProvider === 'gemini') {
-        const testModels = ['gemini-3.5-flash-lite', 'gemini-flash-lite-latest', 'gemini-3.5-flash'];
-        let verified = false;
-        let lastErr = '';
-        for (const m of testModels) {
-          try {
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${targetKey}`;
-            const r = await fetch(url, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ contents: [{ parts: [{ text: 'ping' }] }] }),
-            });
-            if (r.ok || r.status === 429) { verified = true; break; }
-            const errData = await r.json().catch(() => ({}));
-            lastErr = errData.error?.message || `HTTP ${r.status}`;
-            if (r.status === 400 || r.status === 401 || r.status === 403) break;
-          } catch (e) {
-            lastErr = e.message;
-          }
-        }
-        if (verified) {
-          showStatus('✓ Google Gemini API Key Verified & Online!');
-        } else {
-          showStatus(`✗ Gemini Verification Error: ${lastErr || 'Invalid Key'}`, true);
-        }
+        const availableModels = await discoverGeminiModelsForKey(targetKey);
+        showStatus(`✓ Gemini API key valid. Google lists ${availableModels.length} Flash model(s): ${availableModels.join(', ')}. Availability may vary.`);
       } else if (activeProvider === 'openai') {
         const r = await fetch('https://api.openai.com/v1/models', {
           headers: { Authorization: `Bearer ${targetKey}` },
