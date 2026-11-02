@@ -187,11 +187,10 @@
 
   // Check the public repository through jsDelivr's CDN mirror. No GitHub
   // account, API token, or api.github.com request is required.
-  async function check(token) {
+  async function check() {
     const prior = await getUpdaterState();
     try {
       const handle = await getHandle().catch(() => null);
-      const activeToken = String(token || "").trim();
       const files = await remoteFiles();
       const remoteSha = await remoteExtensionSha(files);
       let appliedSha = prior.appliedSha;
@@ -227,17 +226,16 @@
 
   // Downloads changed files and writes them into the linked folder.
   // The caller reloads the extension when result.reload is true.
-  async function apply(token, { interactive = false } = {}) {
-    if (!navigator.locks) return runApply(token, interactive);
+  async function apply({ interactive = false } = {}) {
+    if (!navigator.locks) return runApply(interactive);
     return navigator.locks.request("autosolve-ai-extension-update", { ifAvailable: true }, async lock => {
       if (!lock) return { ok: false, busy: true, error: "Another update is already running." };
-      return runApply(token, interactive);
+      return runApply(interactive);
     });
   }
-  async function runApply(token, interactive) {
+  async function runApply(interactive) {
     const handle = await getHandle();
     if (!handle) return { ok: false, needsLink: true, error: "The extension folder isn't linked yet. Link the folder containing manifest.json." };
-    token = String(token || "").trim();
     let permission = await handle.queryPermission({ mode: "readwrite" });
     if (permission !== "granted" && interactive) permission = await handle.requestPermission({ mode: "readwrite" });
     if (permission !== "granted") return { ok: false, needsPermission: true, error: "Folder access needs to be granted again." };
