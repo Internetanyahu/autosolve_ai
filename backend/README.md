@@ -41,6 +41,25 @@ npm run dev
 
 The service listens on port 8080 by default. Set `GEMINI_MODEL` to change the default Gemini model.
 
-## Deploy
+## Deploy to Google Cloud Run
 
-The included Dockerfile is suitable for Google Cloud Run. Deploying this source does not automatically change the currently hosted Cloud Run service; a deployment must be run separately.
+The included Dockerfile is suitable for Cloud Run. The source is not live until it is deployed.
+
+1. Open [Google Cloud Shell](https://console.cloud.google.com/?cloudshell=true) in the Google account that owns the current Cloud Run project.
+2. Confirm the active project:
+   ```sh
+   gcloud config get-value project
+   ```
+3. Clone the repository and deploy the backend as a separate service:
+   ```sh
+   git clone https://github.com/Internetanyahu/autosolve_ai.git
+   cd autosolve_ai
+   gcloud run deploy autosolve-ai-backend --source backend --region us-west2 --allow-unauthenticated
+   ```
+4. Copy the service URL printed by the deployment. Check it with:
+   ```sh
+   gcloud run services describe autosolve-ai-backend --region us-west2 --format='value(status.url)'
+   ```
+5. The extension must then be pointed at that new URL by changing `DEFAULT_SERVER_URL` in the repository-root `background.js`. Do not change it before the new service responds successfully at `/api/status`.
+
+If Cloud Run asks to enable APIs or create a build service account, approve the requested setup. The deployment creates a new Cloud Run service; it does not overwrite the existing AI Studio service.
