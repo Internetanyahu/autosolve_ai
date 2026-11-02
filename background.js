@@ -172,7 +172,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 async function handleTextSolve(req) {
   const { text, provider = 'gemini', apiKey, model, baseUrl } = req;
   logEvent('ACTION', `[TEXT MODE] Solving question using ${provider.toUpperCase()}...`);
-  logEvent('INFO', '[DIAGNOSTIC] Background build 2026-11-02-b: TRIGGER_TEXT_SOLVE received; backend-first path enabled. Input characters: ' + String(text || '').length);
+  logEvent('INFO', '[DIAGNOSTIC] TRIGGER_TEXT_SOLVE received. Input characters: ' + String(text || '').length);
 
   // Match the older working backend contract: allow the server to finish and
   // send the editable prompt as userPrompt (the field its route accepts).
@@ -323,7 +323,7 @@ chrome.commands.onCommand.addListener(command => {
 });
 
 function parseGeminiJson(raw) {
-  const source = String(raw || '').replace(/^\\uFEFF/, '').trim();
+  const source = String(raw || '').replace(/^\uFEFF/, '').trim();
   if (!source) throw new Error('Gemini returned an empty response.');
 
   const candidates = [source.replace(/^\s*```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim()];
@@ -337,7 +337,7 @@ function parseGeminiJson(raw) {
       const ch = text[i];
       if (inString) {
         if (escaped) escaped = false;
-        else if (ch === '\\\\') escaped = true;
+        else if (ch === '\\') escaped = true;
         else if (ch === '"') inString = false;
       } else if (ch === '"') inString = true;
       else if (ch === '{') depth++;
