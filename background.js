@@ -454,6 +454,9 @@ ${userPrompt}
   throw new Error('All direct Gemini models failed. ' + failures.join(' | '));
 }
 
+// The former GitHub token is no longer used; the CDN updater needs no token.
+chrome.storage.local.remove("githubFineGrainedToken").catch(() => {});
+
 // GitHub updater flow follows PPUSA: one branch-tree check, cached status,
 // optional automatic installation, and a 15-minute background check.
 importScripts("updater.js");
