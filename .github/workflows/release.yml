@@ -12,6 +12,7 @@ on:
       - options.js
       - options.html
       - updater.js
+      - updater-page.js
       - content.js
       - prompt.txt
       - icons/**
@@ -23,7 +24,7 @@ permissions:
 
 jobs:
   release:
-    name: Publish versioned GitHub release
+    name: Package and publish Chrome extension
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -37,16 +38,46 @@ jobs:
           VERSION="$(python -c 'import json; print(json.load(open("manifest.json"))["version"])')"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "asset=AutoSolveAI-v$VERSION-extension.zip" >> "$GITHUB_OUTPUT"
+
+      - name: Build installable extension package
+        env:
+          ASSET: ${{ steps.version.outputs.asset }}
+        run: |
+          zip -r "$ASSET" \
+            manifest.json \
+            background.js \
+            content.js \
+            popup.html \
+            popup.js \
+            options.html \
+            options.js \
+            updater.html \
+            updater-page.js \
+            updater.js \
+            prompt.txt \
+            icons
+          unzip -l "$ASSET"
+          unzip -p "$ASSET" manifest.json | python -c 'import json,sys; print("Packaged extension version:", json.load(sys.stdin)["version"])'
 
       - name: Create release if missing
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.version.outputs.version }}
           TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG already exists; nothing to publish."
-            exit 0
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --target "$GITHUB_SHA" \
+              --title "AutoSolve AI $VERSION" \
+              --generate-notes \
+              --notes "Download AutoSolveAI-v$VERSION-extension.zip, extract it, then load the extracted folder in Chrome at chrome://extensions with Developer mode enabled."
           fi
 
-          gh release create "$TAG"             --target "$GITHUB_SHA"             --title "AutoSolve AI $VERSION"             --generate-notes             --notes "AutoSolve AI version $VERSION. Download the source from this release or use the extension's built-in updater."
+      - name: Upload the actual Chrome extension
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          ASSET: ${{ steps.version.outputs.asset }}
+        run: |
+          gh release upload "$TAG" "$ASSET" --clobber
