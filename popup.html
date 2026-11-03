@@ -391,7 +391,10 @@
 <!-- Live Output Console (Outputs Numbered Answers: [1], [2], etc.) -->
   <div class="console-header" style="margin-top:8px;">
     <span>OUTPUT & NUMBERED ANSWERS</span>
-    <button id="btn-clear" style="background:none; border:none; color:#64748b; cursor:pointer; font-size:10px;">Clear Console</button>
+    <div style="display:flex; align-items:center; gap:10px;">
+      <button id="btn-reset-session" type="button" title="Erase saved page text, answers, and console history while keeping settings" style="background:none; border:1px solid #7f1d1d; border-radius:4px; color:#fca5a5; cursor:pointer; font-size:10px; padding:4px 7px;">Reset Session</button>
+      <button id="btn-clear" style="background:none; border:none; color:#64748b; cursor:pointer; font-size:10px;">Clear Console</button>
+    </div>
   </div>
   <div class="console" id="console-box">
     <div class="log-item" style="color:#64748b;">Text Mode Active: Paste your question above to get answers numbered [1], [2], etc. (No screen clicks).</div>
