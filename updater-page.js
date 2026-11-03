@@ -45,12 +45,19 @@ async function render() {
   if (info.error) {
     updateStatus.className = "msg error";
     updateStatus.textContent = info.error;
+  } else if (!info.linked) {
+    updateStatus.className = "msg";
+    updateStatus.textContent = "Link your existing Load unpacked folder to compare its files and install updates. You do not need to upload or reinstall the extension.";
+  } else if (info.permission !== "granted") {
+    updateStatus.className = "msg";
+    updateStatus.textContent = "Folder linked. Click Install update and allow folder access so the updater can inspect and update the existing files.";
   } else if (info.updateAvailable) {
     updateStatus.className = "msg";
-    updateStatus.textContent = "An update is available (" + short(info.remoteSha) + ").";
+    const files = Array.isArray(info.changedFiles) ? info.changedFiles.length : 0;
+    updateStatus.textContent = "Update available: " + files + " local file(s) differ from GitHub (" + short(info.remoteSha) + ").";
   } else {
     updateStatus.className = "msg good";
-    updateStatus.textContent = "Up to date." + (info.linked ? "" : " Link the folder so future updates install automatically.");
+    updateStatus.textContent = "Installed folder files match the latest GitHub commit.";
   }
   return info;
 }

@@ -43,8 +43,15 @@
   // Use jsDelivr's GitHub mirror instead of api.github.com. This avoids
   // GitHub's unauthenticated REST API rate limit. The package tree provides
   // paths; file bytes are hashed locally to detect changes.
-  const CDN_TREE = "https://data.jsdelivr.com/v1/package/gh/" + REPO + "@" + BRANCH;
-  const CDN_FILE = "https://cdn.jsdelivr.net/gh/" + REPO + "@" + BRANCH + "/";
+  // Resolve main to an immutable commit before downloading. Branch-based CDN
+  // URLs can remain cached and falsely make an old extension look current.
+  async function latestCommitSha() {
+    const response = await cdnFetch("https://api.github.com/repos/" + REPO + "/git/ref/heads/" + BRANCH, "GitHub branch check");
+    const data = await response.json();
+    const sha = data?.object?.sha;
+    if (!/^[a-f0-9]{40}$/i.test(sha || "")) throw new Error("GitHub returned an invalid main-branch commit.");
+    return sha;
+  }
 
   async function cdnFetch(url, label) {
     const controller = new AbortController();
@@ -81,16 +88,19 @@
   }
 
   async function remoteFiles() {
-    const response = await cdnFetch(CDN_TREE, "CDN package listing");
+    const commitSha = await latestCommitSha();
+    const treeUrl = "https://data.jsdelivr.com/v1/package/gh/" + REPO + "@" + commitSha;
+    const fileBase = "https://cdn.jsdelivr.net/gh/" + REPO + "@" + commitSha + "/";
+    const response = await cdnFetch(treeUrl, "Pinned CDN package listing");
     const listing = await response.json();
     const paths = flattenPackageTree(listing.files);
     if (!paths.includes("manifest.json")) {
-      throw new Error("The CDN package listing has no manifest.json; refusing to update.");
+      throw new Error("The pinned GitHub commit has no manifest.json; refusing to update.");
     }
 
     const files = [];
     for (const path of paths) {
-      const url = CDN_FILE + path.split("/").map(encodeURIComponent).join("/");
+      const url = fileBase + path.split("/").map(encodeURIComponent).join("/");
       const fileResponse = await cdnFetch(url, "Download of " + path);
       const bytes = new Uint8Array(await fileResponse.arrayBuffer());
       files.push({ path, sha: await gitBlobSha(bytes), bytes });
@@ -193,18 +203,31 @@
       const handle = await getHandle().catch(() => null);
       const files = await remoteFiles();
       const remoteSha = await remoteExtensionSha(files);
-      let appliedSha = prior.appliedSha;
-      if (!appliedSha) {
-        appliedSha = remoteSha;
-        await chrome.storage.local.set({ updaterState: { ...prior, appliedSha } });
-      }
       let permission = "none";
       if (handle) permission = await handle.queryPermission({ mode: "readwrite" }).catch(() => "prompt");
+      const changedFiles = [];
+
+      // Compare against the actual selected extension folder. Never assume
+      // that a missing saved revision means the local files are current.
+      if (handle && permission === "granted") {
+        for (const file of files) {
+          const local = await readLocal(handle, file.path);
+          if (file.path === "manifest.json" && local) {
+            if (!manifestsEqualExceptVersion(local, file.bytes)) changedFiles.push(file.path);
+          } else if (!local || await gitBlobSha(local) !== file.sha) {
+            changedFiles.push(file.path);
+          }
+        }
+      }
+
       return {
         currentVersion: chrome.runtime.getManifest().version,
-        remoteSha, appliedSha,
-        updateAvailable: remoteSha !== appliedSha,
-        linked: Boolean(handle), permission,
+        remoteSha,
+        appliedSha: prior.appliedSha || null,
+        updateAvailable: Boolean(handle && permission === "granted" && changedFiles.length),
+        changedFiles,
+        linked: Boolean(handle),
+        permission,
         lastApplied: prior.lastApplied || null,
         checkedAt: new Date().toISOString(),
         githubUrl: "https://github.com/" + REPO,
