@@ -299,13 +299,24 @@ async function handleAutoCopyAndSolve() {
       logEvent('ACTION', `📋 Auto-copied question from page (${pageText.slice(0, 60)}...). Solving...`);
       chrome.storage.local.set({ savedPastedText: pageText });
 
-      const config = await getSelectedProviderConfig();
-      handleTextSolve({
+      const result = await handleTextSolve({
         text: pageText,
-        provider: config.provider,
-        apiKey: config.apiKey,
-        model: 'gemini-3.1-flash-lite',
+        source: 'keyboard_shortcut',
       });
+
+      // Persist and broadcast the completed result so the popup/side panel
+      // can render the same answer banner as the manual Solve button.
+      const resultPayload = {
+        result,
+        text: pageText,
+        completedAt: new Date().toISOString(),
+      };
+      await chrome.storage.local.set({ lastAutoSolveResult: resultPayload });
+      chrome.runtime.sendMessage({
+        action: 'AUTO_SOLVE_RESULT',
+        payload: resultPayload,
+      }).catch(() => {});
+
     });
   } catch (err) {
     logEvent('ERROR', `Auto-copy failed: ${err.message}`);
