@@ -25,7 +25,7 @@ label{display:block;font-weight:600;margin:10px 0 5px;color:#cbd5e1}input,textar
  <div class="key-card"><label for="key-mistral">Mistral API key</label><input id="key-mistral" type="password" autocomplete="off" placeholder="..."><p class="hint">Free experimentation tier where available; verify your account's model access.</p></div>
 </div>
 <div class="section-title">Model priority</div>
-<p class="hint" style="margin-bottom:10px">Top enabled model is tried first. Use the arrows to reorder models and the checkbox to enable or disable them. The default starts with the existing Gemini model, then uses independent providers as fallbacks. Save to apply.</p>
+<p class="hint" style="margin-bottom:10px">Top enabled model is tried first. Use the arrows to reorder models and the checkbox to enable or disable them. Gemini 3.1 Flash-Lite is first by default, followed by Gemini 2.5 Flash and Gemini Flash Latest, then independent providers. Save to apply.</p>
 <div id="model-list"></div>
 <div class="section-title">Additional instructions</div>
 <label for="customPrompt">Optional instructions</label><textarea id="customPrompt" rows="10"></textarea><p class="hint">Appended to AutoSolve's built-in instructions. Leave blank to use prompt.txt defaults.</p>
