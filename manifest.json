@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AutoSolve AI - Text Q&A",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "description": "Extracts visible page text, solves questions with your selected AI provider, and provides manual page progression.",
   "permissions": [
     "activeTab",
