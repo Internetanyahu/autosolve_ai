@@ -1,6 +1,19 @@
 document.addEventListener('DOMContentLoaded', async () => {
   const $ = id => document.getElementById(id);
   const status = $('status-msg');
+  const updaterButton = $('update-download');
+  const updaterStatus = $('update-status');
+  if (updaterButton) updaterButton.addEventListener('click', () => {
+    updaterButton.disabled = true;
+    updaterButton.textContent = 'Opening…';
+    chrome.tabs.create({ url: chrome.runtime.getURL('updater.html') }, () => {
+      if (chrome.runtime.lastError) {
+        updaterButton.disabled = false;
+        updaterButton.textContent = 'Open updater';
+        if (updaterStatus) updaterStatus.textContent = 'Could not open updater: ' + chrome.runtime.lastError.message;
+      }
+    });
+  });
   const keyFields = { gemini:'key-gemini', groq:'key-groq', openrouter:'key-openrouter', mistral:'key-mistral' };
   const MODELS = [
     {id:'gemini-3.1-flash-lite',provider:'gemini',name:'Gemini 3.1 Flash-Lite',note:'Google · primary model'},
