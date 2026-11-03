@@ -103,35 +103,8 @@ async function getGeminiApiKey() {
 }
 
 async function getSelectedProviderConfig() {
-  return new Promise((resolve) => {
-    chrome.storage.sync.get(
-      [
-        'selectedAiProvider',
-        'geminiApiKey',
-        'openaiApiKey',
-        'claudeApiKey',
-        'deepseekApiKey',
-        'customApiKey',
-        'customBaseUrl',
-        'customModel',
-      ],
-      (res) => {
-        const provider = res.selectedAiProvider || 'gemini';
-        let apiKey = res.geminiApiKey || '';
-        if (provider === 'openai') apiKey = res.openaiApiKey || '';
-        else if (provider === 'anthropic' || provider === 'claude') apiKey = res.claudeApiKey || '';
-        else if (provider === 'deepseek') apiKey = res.deepseekApiKey || '';
-        else if (provider === 'custom') apiKey = res.customApiKey || '';
-
-        resolve({
-          provider,
-          apiKey,
-          customBaseUrl: res.customBaseUrl || '',
-          customModel: res.customModel || '',
-        });
-      }
-    );
-  });
+  const apiKey = await getGeminiApiKey();
+  return { provider: 'gemini', apiKey, model: 'gemini-3.1-flash-lite' };
 }
 
 async function getServerUrl() {
@@ -172,18 +145,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 // Text Mode Q&A Handler — direct provider requests; no hosted backend.
 async function handleTextSolve(req) {
   const text = String(req.text || '');
-  const provider = String(req.provider || 'gemini').toLowerCase();
   const apiKey = String(req.apiKey || '').trim();
-  const model = String(req.model || '').trim();
-  const baseUrl = String(req.baseUrl || '').trim();
-
+  const selectedModel = 'gemini-3.1-flash-lite';
   if (!text.trim()) throw new Error('Enter or capture page text before solving.');
-  if (!apiKey) throw new Error(`A ${provider.toUpperCase()} API key is required. Add it in Settings.`);
+  if (!apiKey) throw new Error('A Gemini API key is required. Add it in Settings.');
   if (text.length > 500000) throw new Error('Page text exceeds the 500,000-character limit.');
-
-  logEvent('ACTION', `[TEXT MODE] Sending page text directly to ${provider.toUpperCase()} (no hosted backend)...`);
-  logEvent('INFO', `[DIAGNOSTIC] Direct provider request. Input characters: ${text.length}`);
-
+  logEvent('ACTION', '[TEXT MODE] Sending page text directly to Gemini 3.1 Flash-Lite...');
+  logEvent('INFO', '[DIAGNOSTIC] Fixed free-tier model. Input characters: ' + text.length);
   const userPrompt = await getCustomPrompt();
   const promptContent = `User Question / Content:
 ${text}
@@ -192,108 +160,35 @@ ${userPrompt ? `User Custom Instructions:
 ${userPrompt}
 
 ` : ''}Answer every supplied question in order. Follow the user's requested output format.`;
-
-  // The system prompt deliberately accepts plain text. JSON is parsed when a
-  // provider returns it, but a valid non-JSON answer is never rejected.
-  const systemPrompt = AUTOSOLVE_SYSTEM_PROMPT;
-
-  const configs = {
-    gemini: { model: 'gemini-3.8-flash' },
-    openai: { model: 'gpt-5.5', baseUrl: 'https://api.openai.com/v1' },
-    anthropic: { model: 'claude-haiku-5-5' },
-    claude: { model: 'claude-haiku-5-5' },
-    deepseek: { model: 'deepseek-chat', baseUrl: 'https://api.deepseek.com' },
-    custom: { model: model || 'openai/gpt-5.5', baseUrl: 'https://openrouter.ai/api/v1' },
-  };
-  const config = configs[provider];
-  if (!config) throw new Error(`Unsupported AI provider: ${provider}`);
-  const selectedModel = model || config.model;
-  let rawOutput = '';
-  let response;
-
-  if (provider === 'gemini') {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(selectedModel)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-    response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      signal: AbortSignal.timeout(185000),
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: systemPrompt }] },
-        contents: [{ role: 'user', parts: [{ text: promptContent }] }],
-        generationConfig: { temperature: 0.1, maxOutputTokens: 8192 },
-      }),
-    });
-    const body = await response.text();
-    let data = {};
-    try { data = body ? JSON.parse(body) : {}; } catch {}
-    if (!response.ok) throw new Error(`Gemini API HTTP ${response.status} (${selectedModel}): ${data.error?.message || body.slice(0, 700) || 'Request failed'}`);
-    rawOutput = data.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('').trim() || '';
-    if (!rawOutput) {
-      const reason = data.promptFeedback?.blockReason || data.candidates?.[0]?.finishReason || 'No response text';
-      throw new Error(`Gemini returned no answer text: ${reason}`);
-    }
-  } else if (provider === 'anthropic' || provider === 'claude') {
-    response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true',
-      },
-      signal: AbortSignal.timeout(185000),
-      body: JSON.stringify({
-        model: selectedModel,
-        max_tokens: 8192,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: promptContent }],
-        temperature: 0.1,
-      }),
-    });
-    const body = await response.text();
-    let data = {};
-    try { data = body ? JSON.parse(body) : {}; } catch {}
-    if (!response.ok) throw new Error(`Anthropic API HTTP ${response.status}: ${data.error?.message || body.slice(0, 700) || 'Request failed'}`);
-    rawOutput = Array.isArray(data.content) ? data.content.map(part => part.text || '').join('').trim() : '';
-  } else {
-    const endpoint = (provider === 'custom' ? (baseUrl || config.baseUrl) : config.baseUrl).replace(/\/+$/, '');
-    if (!endpoint || !/^https:\/\//i.test(endpoint)) throw new Error('The custom provider endpoint must be a valid HTTPS URL.');
-    response = await fetch(`${endpoint}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      signal: AbortSignal.timeout(185000),
-      body: JSON.stringify({
-        model: selectedModel,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: promptContent },
-        ],
-        temperature: 0.1,
-      }),
-    });
-    const body = await response.text();
-    let data = {};
-    try { data = body ? JSON.parse(body) : {}; } catch {}
-    if (!response.ok) throw new Error(`${provider.toUpperCase()} API HTTP ${response.status}: ${data.error?.message || body.slice(0, 700) || 'Request failed'}`);
-    const content = data.choices?.[0]?.message?.content;
-    rawOutput = typeof content === 'string' ? content.trim() :
-      Array.isArray(content) ? content.map(part => part?.text || '').join('').trim() : '';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(185000),
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: AUTOSOLVE_SYSTEM_PROMPT }] },
+      contents: [{ role: 'user', parts: [{ text: promptContent }] }],
+      generationConfig: { temperature: 0.1, maxOutputTokens: 4096 },
+    }),
+  });
+  const body = await response.text();
+  let data = {};
+  try { data = body ? JSON.parse(body) : {}; } catch {}
+  if (!response.ok) throw new Error(`Gemini API HTTP ${response.status} (${selectedModel}): ${data.error?.message || body.slice(0, 700) || 'Request failed'}`);
+  const rawOutput = data.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('').trim() || '';
+  if (!rawOutput) {
+    const reason = data.promptFeedback?.blockReason || data.candidates?.[0]?.finishReason || 'No response text';
+    throw new Error('Gemini returned no answer text: ' + reason);
   }
-
-  if (!rawOutput) throw new Error(`${provider.toUpperCase()} returned an empty response.`);
   let parsed = parseGeminiJson(rawOutput);
   if (parsed.parseWarning) parsed = { rawText: rawOutput, answers: [], allChoices: [], dropdowns: [] };
   const result = normalizeAndExtractAnswers(parsed, text);
   if (!result.answers.length && !result.rawText) result.rawText = rawOutput;
-  result.provider = provider === 'claude' ? 'anthropic' : provider;
+  result.provider = 'gemini';
   result.model = selectedModel;
-
-  logEvent('COMPLETE', `[TEXT MODE] Solved directly with ${result.provider.toUpperCase()} (${selectedModel})`);
-  if (result.answers.length) {
-    result.answers.forEach(answer => logEvent('ANSWER', `[TEXT MODE] Question [${answer.number}]: ${answer.text}`));
-  } else {
-    logEvent('INFO', '[TEXT MODE] Provider response preserved as text; no structured answer array was detected.');
-  }
+  logEvent('COMPLETE', '[TEXT MODE] Solved with GEMINI (' + selectedModel + ')');
+  if (result.answers.length) result.answers.forEach(answer => logEvent('ANSWER', '[TEXT MODE] Question [' + answer.number + ']: ' + answer.text));
+  else logEvent('INFO', '[TEXT MODE] Provider response preserved as text; no structured answer array was detected.');
   if (result.conciseReasoning) logEvent('REASONING', result.conciseReasoning);
   return { success: true, result };
 }
