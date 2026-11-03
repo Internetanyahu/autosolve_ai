@@ -2,36 +2,34 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>AutoSolve AI Settings</title>
 <style>
-*{box-sizing:border-box}body{background:#090d16;color:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:24px;max-width:580px;margin:0 auto;font-size:13px}
-h2{font-size:18px;margin-bottom:4px;color:#38bdf8}p.sub{color:#94a3b8;margin-bottom:20px;font-size:12px}
-.section-title{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:#38bdf8;font-weight:700;margin-top:18px;margin-bottom:10px;border-bottom:1px solid #1e293b;padding-bottom:4px}
-label{display:block;font-weight:600;margin-bottom:5px;color:#cbd5e1}.hint{font-size:11px;color:#94a3b8;margin-top:4px;margin-bottom:12px}
-input[type=password],input[type=number],textarea{width:100%;padding:9px 12px;background:#1e293b;border:1px solid #334155;color:#fff;border-radius:6px;margin-bottom:6px;font-size:13px}
-textarea{background:#0f172a;color:#e2e8f0;font:12px/1.5 monospace;resize:vertical}.btn-row{display:flex;gap:10px;margin-top:22px}
-button{padding:10px 18px;border-radius:6px;cursor:pointer;font-weight:600;font-size:13px;border:none}.btn-save{background:#2563eb;color:#fff;flex:1}
-.btn-test{background:#1e293b;color:#94a3b8;border:1px solid #334155}#status-msg{margin-top:14px;padding:10px 12px;border-radius:6px;font-size:12px;display:none}
-.status-success{background:#064e3b;color:#6ee7b7;border:1px solid #059669}.status-error{background:#7f1d1d;color:#fca5a5;border:1px solid #dc2626}
+*{box-sizing:border-box}body{background:#090d16;color:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:24px;max-width:760px;margin:0 auto;font-size:13px}
+h2{font-size:19px;color:#38bdf8;margin-bottom:5px}.sub,.hint{color:#94a3b8;font-size:12px;line-height:1.5}.section-title{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:#38bdf8;font-weight:700;margin-top:22px;margin-bottom:10px;border-bottom:1px solid #1e293b;padding-bottom:5px}
+label{display:block;font-weight:600;margin:10px 0 5px;color:#cbd5e1}input,textarea{width:100%;padding:9px 11px;background:#1e293b;border:1px solid #334155;color:#fff;border-radius:6px;font-size:13px}textarea{background:#0f172a;color:#e2e8f0;font:12px/1.5 monospace;resize:vertical}
+.key-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.key-card{background:#0f172a;border:1px solid #1e293b;border-radius:7px;padding:12px}.key-card label{margin-top:0}.hint{margin-top:5px}
+#model-list{display:flex;flex-direction:column;gap:7px}.model-row{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:9px;align-items:center;background:#0f172a;border:1px solid #263449;border-radius:7px;padding:9px}.model-row.disabled{opacity:.48}.model-name{font-weight:700;color:#e2e8f0}.model-meta{font-size:11px;color:#94a3b8;margin-top:3px}.model-actions{display:flex;gap:4px;align-items:center}.model-actions button,.small-btn{background:#1e293b;color:#cbd5e1;border:1px solid #334155;border-radius:4px;padding:5px 7px;cursor:pointer}.model-actions button:disabled{opacity:.3;cursor:default}.model-actions input{width:16px;height:16px}.btn-row{display:flex;gap:10px;margin-top:22px}button.primary{padding:10px 18px;border-radius:6px;cursor:pointer;font-weight:700;border:0;background:#2563eb;color:#fff;flex:1}button.secondary{padding:10px 18px;border-radius:6px;cursor:pointer;font-weight:700;background:#1e293b;color:#cbd5e1;border:1px solid #334155}
+#status-msg{margin-top:14px;padding:10px 12px;border-radius:6px;font-size:12px;display:none}.status-success{background:#064e3b;color:#6ee7b7}.status-error{background:#7f1d1d;color:#fca5a5}
+@media(max-width:560px){.key-grid{grid-template-columns:1fr}.model-row{grid-template-columns:22px minmax(0,1fr) auto}}
 </style>
 </head>
 <body>
 <h2>AutoSolve AI Configuration</h2>
-<p class="sub">Single-provider build. All solving requests use Google's free-tier Gemini 3.1 Flash-Lite model. No paid-provider fallback is configured.</p>
-<div class="section-title">Gemini API</div>
-<label for="geminiApiKey">Google Gemini API Key</label>
-<input type="password" id="geminiApiKey" placeholder="AIzaSy...">
-<p class="hint">Fixed model: gemini-3.1-flash-lite. Free-tier quotas and rate limits still apply.</p>
-<div class="section-title">Additional Instructions</div>
-<label for="customPrompt">Optional instructions</label>
-<textarea id="customPrompt" rows="14"></textarea>
-<p class="hint">These instructions are appended to AutoSolve's built-in instructions. Leave blank to use prompt.txt defaults.</p>
-<div class="section-title">Video Boost</div>
-<label for="videoSpeed">Video Playback Rate</label>
-<input type="number" id="videoSpeed" value="16" min="1" max="16" step="1">
-<p class="hint">Playback speed used by the Video Boost toggle in the popup (1x to 16x).</p>
-<div class="btn-row"><button class="btn-save" id="save-btn">Save Settings</button><button class="btn-test" id="test-btn">Test Gemini Key</button></div>
-<div id="status-msg"></div>
+<p class="sub">Use free-tier API accounts. AutoSolve tries enabled models in priority order and moves to the next model when a request fails. Free quotas and availability vary by account and can change without notice.</p>
+<div class="section-title">Provider API keys</div>
+<div class="key-grid">
+ <div class="key-card"><label for="key-gemini">Google Gemini API key</label><input id="key-gemini" type="password" autocomplete="off" placeholder="AIzaSy..."><p class="hint">Get a key from Google AI Studio. Existing Gemini key is retained.</p></div>
+ <div class="key-card"><label for="key-groq">Groq API key</label><input id="key-groq" type="password" autocomplete="off" placeholder="gsk_..."><p class="hint">Free developer tier; model quotas vary.</p></div>
+ <div class="key-card"><label for="key-openrouter">OpenRouter API key</label><input id="key-openrouter" type="password" autocomplete="off" placeholder="sk-or-v1-..."><p class="hint">Use only models marked :free. Free-model daily limits apply.</p></div>
+ <div class="key-card"><label for="key-mistral">Mistral API key</label><input id="key-mistral" type="password" autocomplete="off" placeholder="..."><p class="hint">Free experimentation tier where available; verify your account's model access.</p></div>
+</div>
+<div class="section-title">Model priority</div>
+<p class="hint" style="margin-bottom:10px">Top enabled model is tried first. Use the arrows to reorder models and the checkbox to enable or disable them. The default starts with the existing Gemini model, then uses independent providers as fallbacks. Save to apply.</p>
+<div id="model-list"></div>
+<div class="section-title">Additional instructions</div>
+<label for="customPrompt">Optional instructions</label><textarea id="customPrompt" rows="10"></textarea><p class="hint">Appended to AutoSolve's built-in instructions. Leave blank to use prompt.txt defaults.</p>
+<div class="section-title">Video Boost</div><label for="videoSpeed">Video playback rate (1x–16x)</label><input id="videoSpeed" type="number" value="16" min="1" max="16" step="1">
+<div class="btn-row"><button class="primary" id="save-btn">Save Settings</button><button class="secondary" id="test-btn">Test enabled models</button></div><div id="status-msg"></div>
 <script src="options.js"></script>
-</body>
-</html>
+</body></html>
