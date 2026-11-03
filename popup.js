@@ -48,21 +48,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  const keyStorageMap = {
-    gemini: 'geminiApiKey',
-    openai: 'openaiApiKey',
-    anthropic: 'claudeApiKey',
-    deepseek: 'deepseekApiKey',
-    custom: 'customApiKey',
-  };
-
-  const keyPlaceholderMap = {
-    gemini: 'AIzaSy...',
-    openai: 'sk-...',
-    anthropic: 'sk-ant-...',
-    deepseek: 'sk-...',
-    custom: 'Bearer key...',
-  };
+  const keyStorageMap = { gemini: 'geminiApiKey' };
+  const keyPlaceholderMap = { gemini: 'AIzaSy...' };
 
   const MAX_STORED_LOGS = 150;
 
@@ -228,102 +215,48 @@ document.addEventListener('DOMContentLoaded', async () => {
 }
   async function testAndVerifyKey(provider, key) {
     if (!key || key.trim().length < 5) {
-      statusBadge.innerHTML = `<span style="color:#ef4444;">● Paste ${provider.toUpperCase()} Key</span>`;
-      statusBadge.title = 'Enter key and click Save Key';
+      statusBadge.innerHTML = '<span style="color:#ef4444;">● Paste Gemini API Key</span>';
+      statusBadge.title = 'Enter your Gemini API key and save.';
       return false;
     }
-
-    statusBadge.innerHTML = `<span style="color:#eab308;">⟳ Testing ${provider.toUpperCase()}...</span>`;
-    statusBadge.title = 'Checking the selected provider directly; no hosted backend is used.';
-
-    // Verify directly against the selected provider
+    statusBadge.innerHTML = '<span style="color:#eab308;">⟳ Testing Gemini Flash-Lite...</span>';
     try {
-      const startTime = Date.now();
-      if (provider === 'gemini') {
-        const availableModels = await discoverGeminiModelsForKey(key);
-        const latency = Date.now() - startTime;
-        statusBadge.innerHTML = `<span style="color:#10b981;">● Key Valid · ${availableModels.length} Flash model(s)</span>`;
-        statusBadge.title = `Google accepted the key and listed: ${availableModels.join(', ')}. This does not guarantee immediate model capacity.`;
-        appendLog('INFO', `Gemini API key verified through model discovery. Available: ${availableModels.join(', ')} (${latency}ms).`);
-        return true;
-      } else if (provider === 'openai') {
-        const r = await fetch('https://api.openai.com/v1/models', {
-          headers: { Authorization: `Bearer ${key}` },
-        });
-        if (r.ok) {
-          const latency = Date.now() - startTime;
-          statusBadge.innerHTML = `<span style="color:#10b981;">● OpenAI Online (${latency}ms)</span>`;
-          statusBadge.title = 'OpenAI API key is valid. Click to re-test.';
-          return true;
-        } else {
-          statusBadge.innerHTML = `<span style="color:#ef4444;">● Invalid OpenAI Key</span>`;
-          statusBadge.title = 'OpenAI authentication failed';
-          return false;
-        }
-      } else if (provider === 'deepseek') {
-        const r = await fetch('https://api.deepseek.com/models', {
-          headers: { Authorization: `Bearer ${key}` },
-        });
-        if (r.ok) {
-          const latency = Date.now() - startTime;
-          statusBadge.innerHTML = `<span style="color:#10b981;">● DeepSeek Online (${latency}ms)</span>`;
-          statusBadge.title = 'DeepSeek API key is valid. Click to re-test.';
-          return true;
-        } else {
-          statusBadge.innerHTML = `<span style="color:#ef4444;">● Invalid DeepSeek Key</span>`;
-          return false;
-        }
-      } else if (provider === 'anthropic') {
-        if (key.startsWith('sk-ant-') && key.length > 20) {
-          statusBadge.innerHTML = `<span style="color:#10b981;">● Claude Ready</span>`;
-          return true;
-        } else {
-          statusBadge.innerHTML = `<span style="color:#ef4444;">● Invalid Claude Key</span>`;
-          return false;
-        }
-      } else {
-        statusBadge.innerHTML = `<span style="color:#10b981;">● Custom Key Set</span>`;
-        return true;
-      }
-    } catch (netErr) {
-      statusBadge.innerHTML = `<span style="color:#f87171;">● Offline / Net Error</span>`;
-      statusBadge.title = netErr.message || 'Network error';
-      appendLog('ERROR', `Network error testing key: ${netErr.message}`);
+      const started = Date.now();
+      const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite?key=' + encodeURIComponent(key);
+      const response = await fetch(url);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error?.message || ('HTTP ' + response.status));
+      statusBadge.innerHTML = '<span style="color:#10b981;">● Gemini Key Valid</span>';
+      statusBadge.title = 'Gemini API key accepted. Solver is locked to gemini-3.1-flash-lite.';
+      appendLog('INFO', 'Gemini API key verified (' + (Date.now() - started) + 'ms).');
+      return true;
+    } catch (error) {
+      statusBadge.innerHTML = '<span style="color:#ef4444;">● Gemini Key Check Failed</span>';
+      statusBadge.title = error.message;
+      appendLog('ERROR', 'Gemini key verification failed: ' + error.message);
       return false;
     }
   }
 
-  function loadKeyForProvider(provider) {
-    const storageKey = keyStorageMap[provider] || 'geminiApiKey';
-    inputApiKey.placeholder = keyPlaceholderMap[provider] || 'API key...';
+  function loadKeyForProvider() {
+    inputApiKey.placeholder = 'AIzaSy...';
     inputApiKey.value = '';
-
-    chrome.storage.sync.get([storageKey], (res) => {
-      const savedKey = res[storageKey] || '';
+    chrome.storage.sync.get(['geminiApiKey'], (res) => {
+      const savedKey = res.geminiApiKey || '';
       inputApiKey.value = savedKey;
-      if (savedKey) {
-        testAndVerifyKey(provider, savedKey);
-      } else {
-        statusBadge.innerHTML = `<span style="color:#ef4444;">● Paste ${provider.toUpperCase()} Key</span>`;
-        statusBadge.title = 'No key saved. Paste key and save.';
+      if (savedKey) testAndVerifyKey('gemini', savedKey);
+      else {
+        statusBadge.innerHTML = '<span style="color:#ef4444;">● Paste Gemini Key</span>';
+        statusBadge.title = 'No Gemini API key saved.';
       }
     });
   }
 
-  // Click status badge to manually re-test active key
   statusBadge.style.cursor = 'pointer';
-  statusBadge.onclick = () => {
-    testAndVerifyKey(selectAiProvider.value, inputApiKey.value.trim());
-  };
-
-  // Persist provider selection immediately when dropdown changes
-  selectAiProvider.onchange = () => {
-    const chosen = selectAiProvider.value;
-    chrome.storage.sync.set({ selectedAiProvider: chosen }, () => {
-      appendLog('INFO', `Switched active provider to ${chosen.toUpperCase()}`);
-    });
-    loadKeyForProvider(chosen);
-  };
+  statusBadge.onclick = () => testAndVerifyKey('gemini', inputApiKey.value.trim());
+  selectAiProvider.value = 'gemini';
+  chrome.storage.sync.set({ selectedAiProvider: 'gemini' });
+  loadKeyForProvider();
 
   btnToggleKey.onclick = () => {
     if (inputApiKey.type === 'password') {
@@ -334,48 +267,30 @@ document.addEventListener('DOMContentLoaded', async () => {
       btnToggleKey.textContent = 'Show';
     }
   };
-
-  // Auto-save key on blur/change so user never loses it
   inputApiKey.addEventListener('change', () => {
-    const provider = selectAiProvider.value;
-    const storageKey = keyStorageMap[provider] || 'geminiApiKey';
     const rawKey = inputApiKey.value.trim();
     if (rawKey) {
-      chrome.storage.sync.set({ [storageKey]: rawKey, selectedAiProvider: provider });
-      testAndVerifyKey(provider, rawKey);
+      chrome.storage.sync.set({ geminiApiKey: rawKey, selectedAiProvider: 'gemini' });
+      testAndVerifyKey('gemini', rawKey);
     }
   });
-
   btnSaveKey.onclick = () => {
-    const provider = selectAiProvider.value;
-    const storageKey = keyStorageMap[provider] || 'geminiApiKey';
     const rawKey = inputApiKey.value.trim();
-
     if (!rawKey) {
-      chrome.storage.sync.remove([storageKey], () => {
-        statusBadge.innerHTML = `<span style="color:#ef4444;">● No Key</span>`;
-        appendLog('INFO', `${provider.toUpperCase()} API key removed.`);
+      chrome.storage.sync.remove(['geminiApiKey'], () => {
+        statusBadge.innerHTML = '<span style="color:#ef4444;">● No Key</span>';
+        appendLog('INFO', 'Gemini API key removed.');
       });
       return;
     }
-
     btnSaveKey.disabled = true;
     btnSaveKey.textContent = 'Verifying...';
-
-    // Store both the key and the active provider selection, and run live verification
-    chrome.storage.sync.set({ [storageKey]: rawKey, selectedAiProvider: provider }, async () => {
+    chrome.storage.sync.set({ geminiApiKey: rawKey, selectedAiProvider: 'gemini' }, async () => {
       btnSaveKey.disabled = false;
       btnSaveKey.textContent = 'Save Key';
-      await testAndVerifyKey(provider, rawKey);
+      await testAndVerifyKey('gemini', rawKey);
     });
   };
-
-  // Initial load: Restore whichever provider the user previously picked
-  chrome.storage.sync.get(['selectedAiProvider'], (res) => {
-    const activeProvider = res.selectedAiProvider || 'gemini';
-    selectAiProvider.value = activeProvider;
-    loadKeyForProvider(activeProvider);
-  });
 
   // Text Mode Solver (passive; page progression is always manual).
   // Retain pasted question text across popup closes
@@ -657,8 +572,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   btnSolveText.onclick = async () => {
     const text = removeAccessibilityCredits(textQuestionInput.value);
     textQuestionInput.value = text;
-    const provider = selectAiProvider.value;
-    const storageKey = keyStorageMap[provider] || 'geminiApiKey';
+    const provider = 'gemini';
+    const storageKey = 'geminiApiKey';
 
     if (!text) {
       appendLog('ERROR', 'Please paste question text or click "⚡ Auto-Copy Page & Solve".');
@@ -670,7 +585,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     appendLog('ACTION', `[TEXT MODE] Sending question to ${provider.toUpperCase()}...`);
 
     // Get current provider key
-    chrome.storage.sync.get([storageKey, 'customBaseUrl', 'customModel'], async (store) => {
+    chrome.storage.sync.get([storageKey], async (store) => {
       const apiKey = store[storageKey] || '';
 
       // Send to background service worker for processing
@@ -680,7 +595,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         responseHandled = true;
         btnSolveText.disabled = false;
         btnSolveText.textContent = 'Solve & Number Answers';
-        appendLog('ERROR', 'Provider request timed out after 190 seconds. Check the selected provider, model, and API quota.');
+        appendLog('ERROR', 'Gemini request timed out after 190 seconds. Check your API quota and try again.');
       }, 190000);
 
       try {
@@ -688,10 +603,8 @@ document.addEventListener('DOMContentLoaded', async () => {
           {
             action: 'TRIGGER_TEXT_SOLVE',
             text,
-            provider,
+            provider: 'gemini',
             apiKey,
-            model: provider === 'custom' ? (store.customModel || '') : '',
-            baseUrl: store.customBaseUrl || '',
           },
           (res) => {
             if (responseHandled) return;
