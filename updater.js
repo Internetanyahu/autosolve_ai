@@ -75,14 +75,21 @@
     }
   }
 
+  // Only update files that belong to the installed Chrome extension.
+  // The repository also contains documentation, data, and development files;
+  // downloading those made the updater appear to hang.
+  const EXTENSION_FILES = [
+    "manifest.json", "background.js", "content.js", "popup.html", "popup.js",
+    "options.html", "options.js", "updater.html", "updater-page.js",
+    "updater.js", "prompt.txt", "icons/icon16.png", "icons/icon48.png",
+    "icons/icon128.png"
+  ];
+
   function flattenPackageTree(entries, prefix = "", output = []) {
     for (const entry of entries || []) {
       const path = prefix ? prefix + "/" + entry.name : entry.name;
-      if (entry.type === "directory") {
-        flattenPackageTree(entry.files, path, output);
-      } else if (entry.type === "file" && path !== "README.md" && !path.startsWith(".github/")) {
-        output.push(path);
-      }
+      if (entry.type === "directory") flattenPackageTree(entry.files, path, output);
+      else if (entry.type === "file" && EXTENSION_FILES.includes(path)) output.push(path);
     }
     return output;
   }
@@ -98,13 +105,12 @@
       throw new Error("The pinned GitHub commit has no manifest.json; refusing to update.");
     }
 
-    const files = [];
-    for (const path of paths) {
+    const files = await Promise.all(paths.map(async path => {
       const url = fileBase + path.split("/").map(encodeURIComponent).join("/");
       const fileResponse = await cdnFetch(url, "Download of " + path);
       const bytes = new Uint8Array(await fileResponse.arrayBuffer());
-      files.push({ path, sha: await gitBlobSha(bytes), bytes });
-    }
+      return { path, sha: await gitBlobSha(bytes), bytes };
+    }));
     return files;
   }
 
