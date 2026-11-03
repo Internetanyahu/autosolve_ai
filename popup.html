@@ -5,8 +5,18 @@
   <title>AutoSolve AI Controller</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      min-height: 100%;
+    }
     body {
       width: 400px;
+      min-height: 100vh;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
       background: #0b0f19;
       color: #f1f5f9;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -187,12 +197,16 @@
       margin-bottom: 4px;
     }
     .console {
+      display: flex;
+      flex-direction: column;
+      flex: 1 1 auto;
+      min-height: 120px;
+      height: auto;
+      overflow-y: auto;
       background: #030712;
       border: 1px solid #1e293b;
       border-radius: 6px;
       padding: 8px;
-      height: 125px;
-      overflow-y: auto;
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
       font-size: 11px;
       line-height: 1.45;
@@ -205,6 +219,11 @@
     .log-ACTION { color: #facc15; }
     .log-COMPLETE { color: #4ade80; font-weight: 700; }
     .big-answer-box {
+      flex: 1 0 auto;
+      min-height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
       margin: 10px 0 6px 0;
       padding: 12px 14px;
       background: linear-gradient(135deg, #064e3b 0%, #065f46 50%, #047857 100%);
@@ -300,6 +319,7 @@
     }
     .btn-header-action:hover { background: #334155; color: #fff; }
     .footer {
+      flex: 0 0 auto;
       display: flex;
       justify-content: space-between;
       align-items: center;
