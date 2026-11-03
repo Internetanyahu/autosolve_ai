@@ -94,7 +94,6 @@ function normalizeAndExtractAnswers(result, rawInputText = '') {
 
 const MODEL_CATALOG = [
   { id: 'gemini-3.1-flash-lite', provider: 'gemini', name: 'Gemini 3.1 Flash-Lite' },
-  { id: 'gemini-2.5-flash', provider: 'gemini', name: 'Gemini 2.5 Flash' },
   { id: 'gemini-flash-latest', provider: 'gemini', name: 'Gemini Flash Latest' },
   { id: 'openai/gpt-oss-120b', provider: 'groq', name: 'GPT-OSS 120B' },
   { id: 'qwen/qwen3.8-27b', provider: 'groq', name: 'Qwen 3.8 27B' },
@@ -118,6 +117,37 @@ async function getProviderSettings() {
 async function getSelectedProviderConfig() {
   const { keys, models } = await getProviderSettings();
   return { provider: models[0]?.provider || 'gemini', apiKey: keys[models[0]?.provider] || '', model: models[0]?.id || 'gemini-3.1-flash-lite' };
+}
+
+async function fetchGeminiWithRetry(url, options, modelName) {
+  const retryableStatuses = new Set([408, 429, 500, 502, 503, 504]);
+  const maxAttempts = 3;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const response = await fetch(url, {
+      ...options,
+      signal: AbortSignal.timeout(90000)
+    });
+    const body = await response.text();
+
+    if (response.ok) return { response, body };
+
+    let data = {};
+    try { data = body ? JSON.parse(body) : {}; } catch {}
+    const message = data.error?.message || body.slice(0, 300);
+
+    if (!retryableStatuses.has(response.status) || attempt === maxAttempts) {
+      throw new Error('HTTP ' + response.status + ': ' + message);
+    }
+
+    const baseDelay = 1000 * (2 ** (attempt - 1));
+    const delay = baseDelay + Math.floor(Math.random() * 500);
+    logEvent('WARN', modelName + ' returned HTTP ' + response.status +
+      '; retry ' + (attempt + 1) + '/' + maxAttempts + ' in ' + (delay / 1000).toFixed(1) + 's.');
+    await new Promise(resolve => setTimeout(resolve, delay));
+  }
+
+  throw new Error(modelName + ' failed after retry attempts.');
 }
 
 
@@ -162,16 +192,17 @@ async function handleTextSolve(req) {
       let response, data = {};
       if (model.provider === 'gemini') {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${model.id}:generateContent?key=${encodeURIComponent(key)}`;
-        response = await fetch(url, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(90000),
+        const geminiRequest = await fetchGeminiWithRetry(url, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             systemInstruction: { parts: [{ text: AUTOSOLVE_SYSTEM_PROMPT }] },
             contents: [{ role: 'user', parts: [{ text: promptContent }] }],
             generationConfig: { temperature: 0.1, maxOutputTokens: 4096 }
           })
-        });
-        const body = await response.text(); try { data = body ? JSON.parse(body) : {}; } catch {}
-        if (!response.ok) throw new Error('HTTP ' + response.status + ': ' + (data.error?.message || body.slice(0, 300)));
+        }, model.name);
+        response = geminiRequest.response;
+        const body = geminiRequest.body;
+        try { data = body ? JSON.parse(body) : {}; } catch {}
         var rawOutput = data.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('').trim() || '';
         if (!rawOutput) throw new Error('No response text: ' + (data.promptFeedback?.blockReason || data.candidates?.[0]?.finishReason || 'empty response'));
       } else {
