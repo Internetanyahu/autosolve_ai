@@ -3,8 +3,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const status = $('status-msg');
   const keyFields = { gemini:'key-gemini', groq:'key-groq', openrouter:'key-openrouter', mistral:'key-mistral' };
   const MODELS = [
-    {id:'gemini-3.1-flash-lite',provider:'gemini',name:'Gemini 3.1 Flash-Lite',note:'Google · current default'},
-    {id:'gemini-2.5-flash',provider:'gemini',name:'Gemini 2.5 Flash',note:'Google · legacy fallback'},
+    {id:'gemini-3.1-flash-lite',provider:'gemini',name:'Gemini 3.1 Flash-Lite',note:'Google · primary model'},
     {id:'gemini-flash-latest',provider:'gemini',name:'Gemini Flash Latest',note:'Google · rolling latest fallback'},
     {id:'openai/gpt-oss-120b',provider:'groq',name:'GPT-OSS 120B',note:'Groq · free tier'},
     {id:'qwen/qwen3.8-27b',provider:'groq',name:'Qwen 3.8 27B',note:'Groq · free tier'},
