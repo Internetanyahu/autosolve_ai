@@ -131,28 +131,6 @@
     const digest = await crypto.subtle.digest("SHA-1", all);
     return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("");
   }
-  function stableJson(value) {
-    if (Array.isArray(value)) return "[" + value.map(stableJson).join(",") + "]";
-    if (value && typeof value === "object") {
-      return "{" + Object.keys(value).sort().map(key => JSON.stringify(key) + ":" + stableJson(value[key])).join(",") + "}";
-    }
-    return JSON.stringify(value);
-  }
-  function manifestsEqualExceptVersion(leftBytes, rightBytes) {
-    try {
-      const left = JSON.parse(new TextDecoder().decode(leftBytes));
-      const right = JSON.parse(new TextDecoder().decode(rightBytes));
-      delete left.version;
-      delete right.version;
-      return stableJson(left) === stableJson(right);
-    } catch { return false; }
-  }
-  function preserveInstalledManifestVersion(remoteBytes, localBytes) {
-    const remote = JSON.parse(new TextDecoder().decode(remoteBytes));
-    const local = JSON.parse(new TextDecoder().decode(localBytes));
-    if (local.version) remote.version = local.version;
-    return new TextEncoder().encode(JSON.stringify(remote, null, 2) + "\n");
-  }
   async function readLocal(root, relativePath) {
     const parts = relativePath.split("/");
     const name = parts.pop();
@@ -218,11 +196,7 @@
       if (handle && permission === "granted") {
         for (const file of files) {
           const local = await readLocal(handle, file.path);
-          if (file.path === "manifest.json" && local) {
-            if (!manifestsEqualExceptVersion(local, file.bytes)) changedFiles.push(file.path);
-          } else if (!local || await gitBlobSha(local) !== file.sha) {
-            changedFiles.push(file.path);
-          }
+          if (!local || await gitBlobSha(local) !== file.sha) changedFiles.push(file.path);
         }
       }
 
@@ -275,13 +249,7 @@
     const changed = [];
     for (const file of files) {
       const local = await readLocal(handle, file.path);
-      if (file.path === "manifest.json" && local) {
-        if (!manifestsEqualExceptVersion(local, file.bytes)) {
-          changed.push({ ...file, preloadedBytes: file.bytes, localManifest: local });
-        }
-      } else if (!local || await gitBlobSha(local) !== file.sha) {
-        changed.push(file);
-      }
+      if (!local || await gitBlobSha(local) !== file.sha) changed.push(file);
     }
     // manifest.json goes last so a failure never leaves it pointing at missing files.
     changed.sort((a, b) => (a.path === "manifest.json") - (b.path === "manifest.json"));
@@ -289,12 +257,9 @@
     // Download and verify everything before writing anything.
     const downloaded = [];
     for (const file of changed) {
-      const sourceBytes = file.preloadedBytes || file.bytes;
+      const sourceBytes = file.bytes;
       if (await gitBlobSha(sourceBytes) !== file.sha) throw new Error("Download of " + file.path + " failed its integrity check.");
-      const bytes = file.path === "manifest.json" && file.localManifest
-        ? preserveInstalledManifestVersion(sourceBytes, file.localManifest)
-        : sourceBytes;
-      downloaded.push({ file, bytes, sourceBytes });
+      downloaded.push({ file, bytes: sourceBytes, sourceBytes });
     }
     const manifest = downloaded.find(item => item.file.path === "manifest.json");
     if (manifest) {
@@ -305,9 +270,7 @@
     for (const { file, bytes, sourceBytes } of downloaded) {
       await writeLocal(handle, file.path, bytes);
       const written = await readLocal(handle, file.path);
-      const verified = file.path === "manifest.json"
-        ? written && manifestsEqualExceptVersion(written, sourceBytes)
-        : written && await gitBlobSha(written) === file.sha;
+      const verified = written && await gitBlobSha(written) === file.sha;
       if (!verified) throw new Error("Could not verify " + file.path + " after writing it.");
     }
 
