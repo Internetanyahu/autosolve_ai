@@ -227,8 +227,7 @@ async function handleAutoCopyAndSolve() {
         text: pageText,
         provider: config.provider,
         apiKey: config.apiKey,
-        model: config.provider === 'custom' ? config.customModel : '',
-        baseUrl: config.customBaseUrl,
+        model: 'gemini-3.1-flash-lite',
       });
     });
   } catch (err) {
@@ -342,88 +341,6 @@ Do not assume a particular school, course, subject, curriculum, website, or empl
 
 OUTPUT FORMAT:
 Respond in plain text, not JSON. Follow the user's custom output format exactly when one is supplied. Put each question's analysis before its final answer. Do not add greetings, filler, or text after a question's FINAL ANSWER. For batches, answer every question in order. For multi-select questions, list every correct option as a separate bullet. Never wrap the response in JSON or Markdown code fences unless the user explicitly asks for them.`;
-
-async function queryGeminiDirectly(apiKey, prompt = '') {
-  if (!apiKey) throw new Error('Gemini API key is required.');
-  const questionText = String(prompt || '');
-  const userPrompt = await getCustomPrompt();
-  const promptContent = `User Question / Content:
-${questionText || '(No question text was supplied)'}
-
-${userPrompt ? `User Custom Instructions:
-${userPrompt}
-
-` : ''}Answer every supplied question in order. Follow the user's requested plain-text format. Do not return JSON or code fences.`;
-
-  const requestBody = {
-    contents: [{ parts: [{ text: promptContent }] }],
-    systemInstruction: { parts: [{ text: AUTOSOLVE_SYSTEM_PROMPT }] },
-    generationConfig: { temperature: 0.1 },
-  };
-
-  // Restore the old sequential fallback behavior. No short per-model timeout:
-  // slower successful generations must be allowed to finish.
-  // Use distinct, documented model IDs. Avoid aliases such as
-  // gemini-flash-latest that can resolve to the same exhausted model.
-  const models = [
-    'gemini-3.5-flash-lite',
-    'gemini-3.1-flash-lite',
-    'gemini-3.6-flash',
-    'gemini-3.8-flash',
-  ];
-  const failures = [];
-
-  for (const model of models) {
-    logEvent('INFO', `[TEXT MODE] Trying Gemini model ${model}...`);
-    try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody),
-      });
-
-      if (!response.ok) {
-        const detail = await response.text();
-        if (/quota exceeded|generate_content_free_tier_requests|resource_exhausted|requests per day limit exceeded/i.test(detail)) {
-          throw new Error(`GEMINI_QUOTA_EXHAUSTED: ${detail.slice(0, 500)}`);
-        }
-        throw new Error(`Gemini API error (${response.status}) on ${model}: ${detail.slice(0, 300)}`);
-      }
-
-      const data = await response.json();
-      const raw = data.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('').trim();
-      if (!raw) {
-        const reason = data.promptFeedback?.blockReason || data.candidates?.[0]?.finishReason || 'No candidate text returned';
-        throw new Error(`Gemini returned no answer text (${reason}).`);
-      }
-
-      let parsed;
-      try {
-        parsed = parseGeminiJson(raw);
-        if (parsed.parseWarning) parsed = { rawText: raw, answers: [], allChoices: [], dropdowns: [] };
-      } catch {
-        parsed = { rawText: raw, answers: [], allChoices: [], dropdowns: [] };
-      }
-      const result = normalizeAndExtractAnswers(parsed, questionText);
-      if (!result.answers.length && !result.rawText) result.rawText = raw;
-      result.provider = 'gemini';
-      result.model = model;
-      logEvent('INFO', `[TEXT MODE] Gemini model ${model} returned a plain-text response.`);
-      return result;
-    } catch (error) {
-      const message = error?.message || String(error);
-      failures.push(`${model}: ${message}`);
-      logEvent('INFO', `[TEXT MODE] ${model} failed: ${message}`);
-      if (message.includes('GEMINI_QUOTA_EXHAUSTED')) {
-        // Gemini quotas are model-specific in many projects. Continue only
-        // to a different model ID; aliases have already been removed above.
-        logEvent('INFO', `[TEXT MODE] Quota exhausted for ${model}; trying the next distinct model.`);
-      }
-    }
-  }
-
-  throw new Error('All direct Gemini models failed. ' + failures.join(' | '));
-}
 
 // The former GitHub token is no longer used; the CDN updater needs no token.
 chrome.storage.local.remove("githubFineGrainedToken").catch(() => {});
