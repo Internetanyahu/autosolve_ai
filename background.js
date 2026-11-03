@@ -130,16 +130,47 @@ async function getSelectedProviderConfig() {
   return { provider: models[0]?.provider || 'gemini', apiKey: keys[models[0]?.provider] || '', model: models[0]?.id || 'gemini-3.1-flash-lite' };
 }
 
+function throwIfSolveAborted(signal) {
+  if (signal?.aborted) {
+    throw signal.reason || new DOMException('Solve cancelled.', 'AbortError');
+  }
+}
+
+function requestSignal(parentSignal) {
+  const timeoutSignal = AbortSignal.timeout(90000);
+  return parentSignal ? AbortSignal.any([parentSignal, timeoutSignal]) : timeoutSignal;
+}
+
+async function abortableDelay(ms, signal) {
+  throwIfSolveAborted(signal);
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(done, ms);
+    function done() {
+      signal?.removeEventListener('abort', abort);
+      resolve();
+    }
+    function abort() {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', abort);
+      reject(signal.reason || new DOMException('Solve cancelled.', 'AbortError'));
+    }
+    signal?.addEventListener('abort', abort, { once: true });
+  });
+  throwIfSolveAborted(signal);
+}
+
 async function fetchGeminiWithRetry(url, options, modelName) {
   const retryableStatuses = new Set([408, 429, 500, 502, 503, 504]);
   const maxAttempts = 3;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    throwIfSolveAborted(options.signal);
     const response = await fetch(url, {
       ...options,
-      signal: AbortSignal.timeout(90000)
+      signal: requestSignal(options.signal)
     });
     const body = await response.text();
+    throwIfSolveAborted(options.signal);
 
     if (response.ok) return { response, body };
 
@@ -155,7 +186,7 @@ async function fetchGeminiWithRetry(url, options, modelName) {
     const delay = baseDelay + Math.floor(Math.random() * 500);
     logEvent('WARN', modelName + ' returned HTTP ' + response.status +
       '; retry ' + (attempt + 1) + '/' + maxAttempts + ' in ' + (delay / 1000).toFixed(1) + 's.');
-    await new Promise(resolve => setTimeout(resolve, delay));
+    await abortableDelay(delay, options.signal);
   }
 
   throw new Error(modelName + ' failed after retry attempts.');
@@ -188,15 +219,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 // Text Mode Q&A Handler — direct provider requests; no hosted backend.
 async function handleTextSolve(req) {
   const text = String(req.text || '');
+  const signal = req.signal;
+  throwIfSolveAborted(signal);
   if (!text.trim()) throw new Error('Enter or capture page text before solving.');
   if (text.length > 500000) throw new Error('Page text exceeds the 500,000-character limit.');
   const { keys, models } = await getProviderSettings();
   if (!models.length) throw new Error('No enabled model has an API key. Add keys and enable models in Full Settings.');
   const userPrompt = await getCustomPrompt();
+  throwIfSolveAborted(signal);
   const promptContent = `User Question / Content:\n${text}\n\n${userPrompt ? `User Custom Instructions:\n${userPrompt}\n\n` : ''}Answer every supplied question in order. Follow the user's requested output format.`;
   const failures = [];
 
   for (const model of models) {
+    throwIfSolveAborted(signal);
     const key = keys[model.provider];
     try {
       logEvent('ACTION', '[TEXT MODE] Trying ' + model.name + ' (' + model.id + ')');
@@ -205,6 +240,7 @@ async function handleTextSolve(req) {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${model.id}:generateContent?key=${encodeURIComponent(key)}`;
         const geminiRequest = await fetchGeminiWithRetry(url, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
+          signal,
           body: JSON.stringify({
             systemInstruction: { parts: [{ text: AUTOSOLVE_SYSTEM_PROMPT }] },
             contents: [{ role: 'user', parts: [{ text: promptContent }] }],
@@ -223,7 +259,7 @@ async function handleTextSolve(req) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key,
             ...(model.provider === 'openrouter' ? { 'HTTP-Referer': 'https://github.com/Internetanyahu/autosolve_ai', 'X-Title': 'AutoSolve AI' } : {}) },
-          signal: AbortSignal.timeout(90000),
+          signal: requestSignal(signal),
           body: JSON.stringify({
             model: model.id,
             messages: [{ role: 'system', content: AUTOSOLVE_SYSTEM_PROMPT }, { role: 'user', content: promptContent }],
@@ -238,6 +274,7 @@ async function handleTextSolve(req) {
         if (!rawOutput) throw new Error('Provider returned an empty response.');
       }
 
+      throwIfSolveAborted(signal);
       let parsed = parseGeminiJson(rawOutput);
       if (parsed.parseWarning) parsed = { rawText: rawOutput, answers: [], allChoices: [], dropdowns: [] };
       const result = normalizeAndExtractAnswers(parsed, text);
@@ -250,6 +287,7 @@ async function handleTextSolve(req) {
       if (result.conciseReasoning) logEvent('REASONING', result.conciseReasoning);
       return { success: true, result };
     } catch (error) {
+      if (signal?.aborted) throw signal.reason || new DOMException('Solve cancelled.', 'AbortError');
       const message = model.name + ' failed: ' + (error?.message || String(error));
       failures.push(message);
       logEvent('ERROR', message + ' — trying next enabled model.');
@@ -281,78 +319,102 @@ async function ensureContentScriptInjected(tabId) {
   return true;
 }
 
-let autoCopySolveInFlight = null;
+let activeAutoCopySolve = null;
 
 function handleAutoCopyAndSolve() {
-  // Chrome can deliver repeated shortcut events close together. Coalesce them
-  // into one extraction/solve operation until the active operation completes.
-  if (autoCopySolveInFlight) {
-    logEvent('WARN', 'Ignored duplicate keyboard shortcut while a solve is already running.');
-    return autoCopySolveInFlight;
+  // A second shortcut cancels the old run and immediately takes ownership.
+  if (activeAutoCopySolve) {
+    logEvent('WARN', 'Cancelling the previous solve because a new keyboard shortcut was pressed.');
+    activeAutoCopySolve.controller.abort(new DOMException('Cancelled by a newer keyboard shortcut.', 'AbortError'));
   }
 
-  autoCopySolveInFlight = (async () => {
+  const operation = { controller: new AbortController(), id: Symbol('auto-solve') };
+  activeAutoCopySolve = operation;
+  const signal = operation.controller.signal;
+
+  const run = (async () => {
     const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    throwIfSolveAborted(signal);
     if (!activeTab?.id) throw new Error('No active tab found for auto-copy.');
 
     await ensureContentScriptInjected(activeTab.id);
+    throwIfSolveAborted(signal);
 
-    // tabs.sendMessage can receive replies from multiple content-script frames.
-    // Accept only the first reply so one shortcut cannot launch multiple solves.
-    const response = await new Promise((resolve, reject) => {
+    // Only the first frame reply is accepted. A late reply from a cancelled
+    // operation cannot launch a solve or replace the newer operation's result.
+    const pageText = await new Promise((resolve, reject) => {
       let settled = false;
-      chrome.tabs.sendMessage(activeTab.id, { action: 'GRAB_PAGE_CONTENT' }, async (res) => {
+      const finish = (fn, value) => {
         if (settled) return;
         settled = true;
+        signal.removeEventListener('abort', onAbort);
+        fn(value);
+      };
+      const onAbort = () => finish(reject, signal.reason || new DOMException('Solve cancelled.', 'AbortError'));
+      signal.addEventListener('abort', onAbort, { once: true });
+
+      chrome.tabs.sendMessage(activeTab.id, { action: 'GRAB_PAGE_CONTENT' }, async (res) => {
+        if (settled) return;
         try {
-          let pageText = res?.text || '';
-          if (!pageText) {
+          let extracted = res?.text || '';
+          if (!extracted) {
             try {
               const results = await chrome.scripting.executeScript({
                 target: { tabId: activeTab.id, allFrames: false },
                 func: () => (window.__AUTOSOLVE_GRAB_CONTENT__ ? window.__AUTOSOLVE_GRAB_CONTENT__().text : document.body.innerText),
               });
-              pageText = results[0]?.result || '';
+              extracted = results[0]?.result || '';
             } catch {}
           }
-          resolve(pageText);
+          finish(resolve, extracted);
         } catch (error) {
-          reject(error);
+          finish(reject, error);
         }
       });
     });
 
-    const pageText = String(response || '');
-    if (!pageText.trim()) throw new Error('Could not detect question text on active page.');
+    throwIfSolveAborted(signal);
+    const text = String(pageText || '');
+    if (!text.trim()) throw new Error('Could not detect question text on active page.');
 
-    logEvent('ACTION', `📋 Auto-copied question from page (${pageText.slice(0, 60)}...). Solving...`);
-    await chrome.storage.local.set({ savedPastedText: pageText });
+    logEvent('ACTION', `📋 Auto-copied question from page (${text.slice(0, 60)}...). Solving...`);
+    await chrome.storage.local.set({ savedPastedText: text });
+    throwIfSolveAborted(signal);
 
     const solveResponse = await handleTextSolve({
-      text: pageText,
+      text,
       source: 'keyboard_shortcut',
+      signal,
     });
+    throwIfSolveAborted(signal);
     if (!solveResponse?.success || !solveResponse.result) {
       throw new Error('The AI returned no displayable result.');
     }
 
+    // A cancelled/older operation must never overwrite a newer answer.
+    if (activeAutoCopySolve !== operation) return;
     const resultPayload = {
       result: solveResponse.result,
-      text: pageText,
+      text,
       completedAt: new Date().toISOString(),
     };
     await chrome.storage.local.set({ lastAutoSolveResult: resultPayload });
+    if (activeAutoCopySolve !== operation || signal.aborted) return;
     chrome.runtime.sendMessage({
       action: 'AUTO_SOLVE_RESULT',
       payload: resultPayload,
     }).catch(() => {});
   })().catch(error => {
-    logEvent('ERROR', `Auto-copy failed: ${error?.message || String(error)}`);
+    if (signal.aborted) {
+      logEvent('INFO', 'Previous keyboard-shortcut solve cancelled.');
+    } else {
+      logEvent('ERROR', `Auto-copy failed: ${error?.message || String(error)}`);
+    }
   }).finally(() => {
-    autoCopySolveInFlight = null;
+    if (activeAutoCopySolve === operation) activeAutoCopySolve = null;
   });
 
-  return autoCopySolveInFlight;
+  return run;
 }
 
 async function getCustomPrompt() {
