@@ -17,6 +17,11 @@ label{display:block;font-weight:600;margin:10px 0 5px;color:#cbd5e1}input,textar
 <body>
 <h2>AutoSolve AI Configuration</h2>
 <p class="sub">Use free-tier API accounts. AutoSolve tries enabled models in priority order and moves to the next model when a request fails. Free quotas and availability vary by account and can change without notice.</p>
+<div class="section-title">Extension updater</div>
+<div class="key-card" style="display:flex;align-items:center;gap:12px">
+ <div style="flex:1;min-width:0"><div style="font-weight:700;color:#e2e8f0">Update AutoSolve AI</div><p class="hint">Check for and install the latest extension files in your linked unpacked folder.</p><p id="update-status" class="hint">Updater ready.</p></div>
+ <button class="small-btn" id="update-download" type="button" style="white-space:nowrap;padding:8px 12px;background:#2563eb;color:#fff;border:0;font-weight:700">Open updater</button>
+</div>
 <div class="section-title">Provider API keys</div>
 <div class="key-grid">
  <div class="key-card"><label for="key-gemini">Google Gemini API key</label><input id="key-gemini" type="password" autocomplete="off" placeholder="AIzaSy..."><p class="hint">Get a key from Google AI Studio. Existing Gemini key is retained.</p></div>
