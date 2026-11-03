@@ -1,8 +1,6 @@
 // AutoSolve AI Background Service Worker (Manifest V3)
 // Text-only solver and manual progression
 
-const DEFAULT_SERVER_URL = 'https://ais-dev-bhivux6smdwnhrhbmoqvfc-726613400165.us-west2.run.app';
-
 const MAX_STORED_LOGS = 150;
 
 function logEvent(level, message, data = null) {
@@ -107,13 +105,6 @@ async function getSelectedProviderConfig() {
   return { provider: 'gemini', apiKey, model: 'gemini-3.1-flash-lite' };
 }
 
-async function getServerUrl() {
-  return new Promise((resolve) => {
-    chrome.storage.sync.get(['serverUrl'], (result) => {
-      resolve(result.serverUrl || DEFAULT_SERVER_URL);
-    });
-  });
-}
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'TRIGGER_TEXT_SOLVE') {
@@ -133,10 +124,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         sendResponse({success,error:success?null:'No visible Next button found.'});
       } catch(error){sendResponse({success:false,error:error.message});}
     });return true;
-  }
-  if(request.action==='GET_STATUS'){
-    Promise.all([getGeminiApiKey(),getServerUrl()]).then(([apiKey,serverUrl])=>sendResponse({status:'active',hasApiKey:!!apiKey,serverUrl}));
-    return true;
   }
 });
  
