@@ -94,7 +94,8 @@ function normalizeAndExtractAnswers(result, rawInputText = '') {
 
 const MODEL_CATALOG = [
   { id: 'gemini-3.1-flash-lite', provider: 'gemini', name: 'Gemini 3.1 Flash-Lite' },
-  { id: 'gemini-2.5-flash-lite', provider: 'gemini', name: 'Gemini 2.5 Flash-Lite' },
+  { id: 'gemini-2.5-flash', provider: 'gemini', name: 'Gemini 2.5 Flash' },
+  { id: 'gemini-flash-latest', provider: 'gemini', name: 'Gemini Flash Latest' }
   { id: 'openai/gpt-oss-120b', provider: 'groq', name: 'GPT-OSS 120B' },
   { id: 'qwen/qwen3.8-27b', provider: 'groq', name: 'Qwen 3.8 27B' },
   { id: 'openai/gpt-oss-20b', provider: 'groq', name: 'GPT-OSS 20B' },
