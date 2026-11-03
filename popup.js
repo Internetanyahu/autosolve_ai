@@ -21,6 +21,27 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+
+  // The update banner is intentionally independent of the network check.
+  // Setup must remain clickable even when GitHub/CDN is slow or unavailable.
+  const updateSetupButton = document.getElementById('update-download');
+  const updateStatusText = document.getElementById('update-status');
+  if (updateStatusText) updateStatusText.textContent = 'Extension updater ready.';
+  if (updateSetupButton) {
+    updateSetupButton.disabled = false;
+    updateSetupButton.addEventListener('click', () => {
+      updateSetupButton.disabled = true;
+      updateSetupButton.textContent = 'Opening…';
+      chrome.tabs.create({ url: chrome.runtime.getURL('updater.html') }, () => {
+        if (chrome.runtime.lastError) {
+          updateSetupButton.disabled = false;
+          updateSetupButton.textContent = 'Set up';
+          if (updateStatusText) updateStatusText.textContent = 'Could not open updater: ' + chrome.runtime.lastError.message;
+        }
+      });
+    });
+  }
+
   // Text Mode controls
   const textQuestionInput = document.getElementById('text-question-input');
   const btnSolveText = document.getElementById('btn-solve-text');
