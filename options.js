@@ -28,7 +28,14 @@ document.addEventListener('DOMContentLoaded', async () => {
       row.append(check,details,actions);host.append(row);
     });
   }
-  const saved=await chrome.storage.sync.get({geminiApiKey:'',providerKeys:{},customPrompt:'',videoSpeed:16,modelPriority:[]});
+  const [synced,local]=await Promise.all([
+    chrome.storage.sync.get({geminiApiKey:'',providerKeys:{},customPrompt:'',videoSpeed:16,modelPriority:[],disabledModels:[]}),
+    chrome.storage.local.get(['modelPriority','disabledModels'])
+  ]);
+  const saved={...synced,
+    modelPriority:Array.isArray(local.modelPriority)?local.modelPriority:synced.modelPriority,
+    disabledModels:Array.isArray(local.disabledModels)?local.disabledModels:synced.disabledModels
+  };
   $('key-gemini').value=saved.geminiApiKey||saved.providerKeys?.gemini||'';
   for(const provider of ['groq','openrouter','mistral'])$(keyFields[provider]).value=saved.providerKeys?.[provider]||'';
   $('customPrompt').value=saved.customPrompt||'';
@@ -42,8 +49,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   if(!$('customPrompt').value)fetch(chrome.runtime.getURL('prompt.txt')).then(r=>r.text()).then(t=>{if(!$('customPrompt').value)$('customPrompt').value=t;}).catch(()=>{});
   $('save-btn').onclick=async()=>{
     const providerKeys={};for(const p of Object.keys(keyFields))providerKeys[p]=$(keyFields[p]).value.trim();
-    await chrome.storage.sync.set({geminiApiKey:providerKeys.gemini,providerKeys,modelPriority:order,disabledModels:order.filter(id=>!enabled.has(id)),customPrompt:$('customPrompt').value,videoSpeed:Math.min(16,Math.max(1,Number($('videoSpeed').value)||16))});
-    show('Settings saved. Enabled models will be tried in the displayed order.');
+    const disabledModels=order.filter(id=>!enabled.has(id));
+    const settings={geminiApiKey:providerKeys.gemini,providerKeys,modelPriority:order,disabledModels,customPrompt:$('customPrompt').value,videoSpeed:Math.min(16,Math.max(1,Number($('videoSpeed').value)||16))};
+    // Write local first for immediate effect, then sync for other devices.
+    await chrome.storage.local.set({modelPriority:order,disabledModels});
+    await chrome.storage.sync.set(settings);
+    const first=order.map(id=>MODELS.find(m=>m.id===id)).find(m=>m&&enabled.has(m.id)&&providerKeys[m.provider]);
+    show('Settings saved. First enabled model: '+(first?.name||'None (check API keys and enabled models)')+'.');
   };
   $('test-btn').onclick=async()=>{
     $('test-btn').disabled=true;show('Testing enabled model endpoints…');
