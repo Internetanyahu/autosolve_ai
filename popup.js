@@ -203,6 +203,37 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  // Render results produced by the keyboard shortcut (background worker).
+  function displayAutoSolveResult(payload) {
+    if (!payload || !payload.result) return;
+    const result = normalizeAndExtractAnswers(payload.result);
+    appendLog('COMPLETE', '=== [KEYBOARD SHORTCUT RESULTS] ===');
+    if (Array.isArray(result.answers) && result.answers.length) {
+      result.answers.forEach((answer) => {
+        if (answer.analysis) appendLog('REASONING', 'Question [' + (answer.number || 1) + '] Analysis: ' + answer.analysis);
+        appendLog('CLICK', 'FINAL ANSWER [' + (answer.number || 1) + ']: ' +
+          (answer.letter ? answer.letter + ' — ' : '') + answer.text);
+      });
+    }
+    if (result.conciseReasoning) appendLog('REASONING', 'Reasoning: ' + result.conciseReasoning);
+    const rawText = result.rawText || (!result.answers?.length ? result.conciseReasoning : '') || '';
+    renderBigGreenAnswer(result.answers || [], result.dropdowns || [], true, rawText);
+  }
+
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message?.action === 'AUTO_SOLVE_RESULT') displayAutoSolveResult(message.payload);
+  });
+
+  // Restore the most recent shortcut result when the popup/side panel opens later.
+  chrome.storage.local.get(['lastAutoSolveResult'], (stored) => {
+    const payload = stored.lastAutoSolveResult;
+    if (!payload?.completedAt) return;
+    const age = Date.now() - new Date(payload.completedAt).getTime();
+    if (Number.isFinite(age) && age >= 0 && age < 24 * 60 * 60 * 1000) {
+      displayAutoSolveResult(payload);
+    }
+  });
+
   // Load and retain console logs when user re-opens popup
   loadSavedLogs();
 
