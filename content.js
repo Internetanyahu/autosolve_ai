@@ -1,5 +1,5 @@
 // AutoSolve AI passive content helper.
-// Extracts rendered page text/dropdowns, adjusts video playback, and supports explicit manual Next only.
+// Extracts rendered page text/dropdowns and adjusts video playback.
 (() => {
   // Remove Edgenuity navigation, accessibility help, and page chrome before
   // copying text to the solver. Keep question wording and answer choices intact.
