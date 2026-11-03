@@ -122,10 +122,16 @@ document.addEventListener('DOMContentLoaded', async () => {
             ? `<div class="big-answer-sub">Question [${num}]: ${escapeHtml(ans.question)}</div>`
             : '';
           const analysis = ans.analysis
-            ? `<div class="big-answer-sub"><strong>Question [${num}] Analysis:</strong> ${escapeHtml(ans.analysis)}</div>`
+            ? `<div class="big-answer-explanation"><strong>Explanation:</strong> ${escapeHtml(ans.analysis)}</div>`
             : '';
           const finalAnswer = `<div class="big-answer-main"><strong>FINAL ANSWER:</strong> ${letter}${escapeHtml(ans.text)}</div>`;
-          return `${question}${analysis}${finalAnswer}`;
+          const choiceNumbers = Array.isArray(ans.choiceNumbers)
+            ? [...new Set(ans.choiceNumbers.map(Number).filter(n => Number.isInteger(n) && n > 0))].sort((a, b) => a - b)
+            : [];
+          const numberLine = choiceNumbers.length
+            ? `<div class="big-answer-numbers">${choiceNumbers.join(' · ')}</div>`
+            : '';
+          return `<div class="big-answer-item">${question}${analysis}${finalAnswer}${numberLine}</div>`;
         })
         .join('');
     } else if (rawText) {
@@ -212,6 +218,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         letter: answer.letter || String.fromCharCode(65 + index),
         text: String(answer.text || (Array.isArray(answer.selections) ? answer.selections.map(item => [item.letter, item.text].filter(Boolean).join(' — ')).join('; ') : '') || ''),
         analysis: String(answer.analysis || ''),
+        choiceNumbers: Array.isArray(answer.choiceNumbers)
+          ? [...new Set(answer.choiceNumbers.map(Number).filter(n => Number.isInteger(n) && n > 0))].sort((a, b) => a - b)
+          : [],
         selections: Array.isArray(answer.selections) ? answer.selections : [],
         isCorrect: true,
       }));
