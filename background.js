@@ -198,20 +198,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     handleTextSolve(request).then(sendResponse).catch(error => sendResponse({success:false,error:error.message}));
     return true;
   }
-  if (request.action === 'TRIGGER_MANUAL_NEXT') {
-    chrome.tabs.query({active:true,currentWindow:true}, async tabs => {
-      const tabId=tabs[0]?.id;
-      if(!tabId){sendResponse({success:false,error:'No active tab found.'});return;}
-      try {
-        const results=await chrome.scripting.executeScript({target:{tabId,allFrames:true},func:()=>{
-          const selectors=['.FrameRight','.footernav.navnext a','a.navnext','#btnNext','#btnCheck','button[aria-label*="next" i]','a[aria-label*="next" i]'];
-          for(const selector of selectors){const el=document.querySelector(selector);if(!el)continue;const s=getComputedStyle(el);if(s.display==='none'||s.visibility==='hidden'||!el.getClientRects().length||el.disabled)continue;el.click();return true;}return false;
-        }});
-        const success=results.some(x=>x.result===true);
-        sendResponse({success,error:success?null:'No visible Next button found.'});
-      } catch(error){sendResponse({success:false,error:error.message});}
-    });return true;
-  }
+
 });
  
 // Text Mode Q&A Handler.
