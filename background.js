@@ -193,12 +193,25 @@ async function fetchGeminiWithRetry(url, options, modelName) {
 }
 
 
+const activeTextSolves = new Set();
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'TRIGGER_TEXT_SOLVE') {
-    handleTextSolve(request).then(sendResponse).catch(error => sendResponse({success:false,error:error.message}));
+    const controller = new AbortController();
+    activeTextSolves.add(controller);
+    handleTextSolve({ ...request, signal: controller.signal })
+      .then(sendResponse)
+      .catch(error => sendResponse({success:false,error:error.message}))
+      .finally(() => activeTextSolves.delete(controller));
     return true;
   }
 
+  if (request.action === 'RESET_SESSION') {
+    resetSession()
+      .then(() => sendResponse({ success: true }))
+      .catch(error => sendResponse({ success: false, error: error?.message || String(error) }));
+    return true;
+  }
 });
  
 // Text Mode Q&A Handler.
@@ -307,6 +320,22 @@ async function ensureContentScriptInjected(tabId) {
 }
 
 let activeAutoCopySolve = null;
+
+async function resetSession() {
+  if (activeAutoCopySolve) {
+    activeAutoCopySolve.controller.abort(new DOMException('Session reset by user.', 'AbortError'));
+    activeAutoCopySolve = null;
+  }
+  for (const controller of activeTextSolves) {
+    controller.abort(new DOMException('Session reset by user.', 'AbortError'));
+  }
+  activeTextSolves.clear();
+  await chrome.storage.local.remove([
+    'savedPastedText',
+    'lastAutoSolveResult',
+    'recentConsoleLogs'
+  ]);
+}
 
 function handleAutoCopyAndSolve() {
   // A second shortcut cancels the old run and immediately takes ownership.
