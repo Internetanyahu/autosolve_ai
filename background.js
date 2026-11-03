@@ -105,12 +105,23 @@ const MODEL_CATALOG = [
 ];
 
 async function getProviderSettings() {
-  const saved = await chrome.storage.sync.get(['geminiApiKey', 'providerKeys', 'modelPriority', 'disabledModels']);
-  const keys = { ...(saved.providerKeys || {}), gemini: saved.providerKeys?.gemini || saved.geminiApiKey || '' };
-  const order = Array.isArray(saved.modelPriority) ? saved.modelPriority : [];
-  const disabled = new Set(Array.isArray(saved.disabledModels) ? saved.disabledModels : []);
-  const models = [...order, ...MODEL_CATALOG.map(m => m.id)].filter((id, index, all) => all.indexOf(id) === index)
-    .map(id => MODEL_CATALOG.find(m => m.id === id)).filter(Boolean).filter(m => !disabled.has(m.id) && keys[m.provider]);
+  // Keep model priority local-first so a just-saved reorder is immediately
+  // honored even while Chrome Sync is still propagating the same setting.
+  const [synced, local] = await Promise.all([
+    chrome.storage.sync.get(['geminiApiKey', 'providerKeys', 'modelPriority', 'disabledModels']),
+    chrome.storage.local.get(['modelPriority', 'disabledModels'])
+  ]);
+  const keys = { ...(synced.providerKeys || {}), gemini: synced.providerKeys?.gemini || synced.geminiApiKey || '' };
+  const savedOrder = Array.isArray(local.modelPriority) ? local.modelPriority :
+    (Array.isArray(synced.modelPriority) ? synced.modelPriority : []);
+  const savedDisabled = Array.isArray(local.disabledModels) ? local.disabledModels :
+    (Array.isArray(synced.disabledModels) ? synced.disabledModels : []);
+  const disabled = new Set(savedDisabled);
+  const order = [...savedOrder, ...MODEL_CATALOG.map(m => m.id)]
+    .filter((id, index, all) => all.indexOf(id) === index);
+  const models = order.map(id => MODEL_CATALOG.find(m => m.id === id))
+    .filter(Boolean).filter(m => !disabled.has(m.id) && keys[m.provider]);
+  logEvent('INFO', '[MODEL PRIORITY] Effective order: ' + models.map(m => m.id).join(' → '));
   return { keys, models };
 }
 
