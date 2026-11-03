@@ -231,19 +231,53 @@
       justify-content: center;
       gap: 6px;
     }
+    .big-answer-item {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 7px 0;
+      border-bottom: 1px solid rgba(167, 243, 208, 0.22);
+    }
+    .big-answer-item:last-child { border-bottom: 0; }
     .big-answer-main {
-      font-size: 18px;
-      font-weight: 900;
+      order: 2;
+      margin-top: 3px;
+      font-size: 17px;
+      font-weight: 850;
       line-height: 1.35;
       color: #ffffff;
       text-shadow: 0 2px 4px rgba(0, 0, 0, 0.6);
       word-break: break-word;
     }
     .big-answer-sub {
-      margin-top: 6px;
-      font-size: 12px;
-      color: #ecfdf5;
-      font-weight: 600;
+      order: 0;
+      margin-top: 2px;
+      font-size: 10px;
+      line-height: 1.4;
+      color: #d1fae5;
+      font-weight: 500;
+      text-align: left;
+    }
+    .big-answer-explanation {
+      order: 1;
+      margin-top: 2px;
+      font-size: 10px;
+      line-height: 1.45;
+      color: #d1fae5;
+      font-weight: 400;
+      text-align: left;
+    }
+    .big-answer-numbers {
+      order: 3;
+      align-self: flex-end;
+      margin-top: 3px;
+      padding: 3px 9px;
+      border-radius: 5px;
+      background: rgba(3, 7, 18, 0.35);
+      color: #ffffff;
+      font-size: 15px;
+      font-weight: 800;
+      letter-spacing: 1px;
     }
     .header-actions {
       display: flex;
