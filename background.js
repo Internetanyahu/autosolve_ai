@@ -270,61 +270,78 @@ async function ensureContentScriptInjected(tabId) {
   return true;
 }
 
-async function handleAutoCopyAndSolve() {
-  try {
+let autoCopySolveInFlight = null;
+
+function handleAutoCopyAndSolve() {
+  // Chrome can deliver repeated shortcut events close together. Coalesce them
+  // into one extraction/solve operation until the active operation completes.
+  if (autoCopySolveInFlight) {
+    logEvent('WARN', 'Ignored duplicate keyboard shortcut while a solve is already running.');
+    return autoCopySolveInFlight;
+  }
+
+  autoCopySolveInFlight = (async () => {
     const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!activeTab || !activeTab.id) {
-      logEvent('ERROR', 'No active tab found for auto-copy.');
-      return;
-    }
+    if (!activeTab?.id) throw new Error('No active tab found for auto-copy.');
+
     await ensureContentScriptInjected(activeTab.id);
 
-    chrome.tabs.sendMessage(activeTab.id, { action: 'GRAB_PAGE_CONTENT' }, async (res) => {
-      let pageText = res?.text || '';
-      if (!pageText) {
+    // tabs.sendMessage can receive replies from multiple content-script frames.
+    // Accept only the first reply so one shortcut cannot launch multiple solves.
+    const response = await new Promise((resolve, reject) => {
+      let settled = false;
+      chrome.tabs.sendMessage(activeTab.id, { action: 'GRAB_PAGE_CONTENT' }, async (res) => {
+        if (settled) return;
+        settled = true;
         try {
-          const results = await chrome.scripting.executeScript({
-            target: { tabId: activeTab.id, allFrames: false },
-            func: () => (window.__AUTOSOLVE_GRAB_CONTENT__ ? window.__AUTOSOLVE_GRAB_CONTENT__().text : document.body.innerText),
-          });
-          pageText = results[0]?.result || '';
-        } catch {}
-      }
-
-      if (!pageText) {
-        logEvent('ERROR', 'Could not detect question text on active page.');
-        return;
-      }
-
-      logEvent('ACTION', `📋 Auto-copied question from page (${pageText.slice(0, 60)}...). Solving...`);
-      chrome.storage.local.set({ savedPastedText: pageText });
-
-      const solveResponse = await handleTextSolve({
-        text: pageText,
-        source: 'keyboard_shortcut',
+          let pageText = res?.text || '';
+          if (!pageText) {
+            try {
+              const results = await chrome.scripting.executeScript({
+                target: { tabId: activeTab.id, allFrames: false },
+                func: () => (window.__AUTOSOLVE_GRAB_CONTENT__ ? window.__AUTOSOLVE_GRAB_CONTENT__().text : document.body.innerText),
+              });
+              pageText = results[0]?.result || '';
+            } catch {}
+          }
+          resolve(pageText);
+        } catch (error) {
+          reject(error);
+        }
       });
-      if (!solveResponse?.success || !solveResponse.result) {
-        throw new Error('The AI returned no displayable result.');
-      }
-      const result = solveResponse.result;
-
-      // Persist and broadcast the completed result so the popup/side panel
-      // can render the same answer banner as the manual Solve button.
-      const resultPayload = {
-        result,
-        text: pageText,
-        completedAt: new Date().toISOString(),
-      };
-      await chrome.storage.local.set({ lastAutoSolveResult: resultPayload });
-      chrome.runtime.sendMessage({
-        action: 'AUTO_SOLVE_RESULT',
-        payload: resultPayload,
-      }).catch(() => {});
-
     });
-  } catch (err) {
-    logEvent('ERROR', `Auto-copy failed: ${err.message}`);
-  }
+
+    const pageText = String(response || '');
+    if (!pageText.trim()) throw new Error('Could not detect question text on active page.');
+
+    logEvent('ACTION', `📋 Auto-copied question from page (${pageText.slice(0, 60)}...). Solving...`);
+    await chrome.storage.local.set({ savedPastedText: pageText });
+
+    const solveResponse = await handleTextSolve({
+      text: pageText,
+      source: 'keyboard_shortcut',
+    });
+    if (!solveResponse?.success || !solveResponse.result) {
+      throw new Error('The AI returned no displayable result.');
+    }
+
+    const resultPayload = {
+      result: solveResponse.result,
+      text: pageText,
+      completedAt: new Date().toISOString(),
+    };
+    await chrome.storage.local.set({ lastAutoSolveResult: resultPayload });
+    chrome.runtime.sendMessage({
+      action: 'AUTO_SOLVE_RESULT',
+      payload: resultPayload,
+    }).catch(() => {});
+  })().catch(error => {
+    logEvent('ERROR', `Auto-copy failed: ${error?.message || String(error)}`);
+  }).finally(() => {
+    autoCopySolveInFlight = null;
+  });
+
+  return autoCopySolveInFlight;
 }
 
 async function getCustomPrompt() {
