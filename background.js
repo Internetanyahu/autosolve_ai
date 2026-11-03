@@ -299,10 +299,14 @@ async function handleAutoCopyAndSolve() {
       logEvent('ACTION', `📋 Auto-copied question from page (${pageText.slice(0, 60)}...). Solving...`);
       chrome.storage.local.set({ savedPastedText: pageText });
 
-      const result = await handleTextSolve({
+      const solveResponse = await handleTextSolve({
         text: pageText,
         source: 'keyboard_shortcut',
       });
+      if (!solveResponse?.success || !solveResponse.result) {
+        throw new Error('The AI returned no displayable result.');
+      }
+      const result = solveResponse.result;
 
       // Persist and broadcast the completed result so the popup/side panel
       // can render the same answer banner as the manual Solve button.
