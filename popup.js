@@ -249,16 +249,17 @@ document.addEventListener('DOMContentLoaded', async () => {
       statusBadge.title = 'Enter your Gemini API key and save.';
       return false;
     }
-    statusBadge.innerHTML = '<span style="color:#eab308;">⟳ Testing Gemini Flash-Lite...</span>';
+    statusBadge.innerHTML = '<span style="color:#eab308;">⟳ Checking Gemini API key...</span>';
     try {
       const started = Date.now();
-      const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite?key=' + encodeURIComponent(key);
-      const response = await fetch(url);
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error?.message || ('HTTP ' + response.status));
+      const models = await discoverGeminiModelsForKey(key);
+      const primaryAvailable = models.includes('gemini-3.1-flash-lite');
       statusBadge.innerHTML = '<span style="color:#10b981;">● Gemini Key Valid</span>';
-      statusBadge.title = 'Gemini API key accepted. Solver is locked to gemini-3.1-flash-lite.';
-      appendLog('INFO', 'Gemini API key verified (' + (Date.now() - started) + 'ms).');
+      statusBadge.title = primaryAvailable
+        ? 'Gemini API key accepted. Flash-Lite is listed as available for this key.'
+        : 'Gemini API key accepted. Flash-Lite was not listed; enabled fallback models will be tried.';
+      appendLog('INFO', 'Gemini API key verified (' + (Date.now() - started) +
+        'ms). Google listed ' + models.length + ' compatible Flash model(s).');
       return true;
     } catch (error) {
       statusBadge.innerHTML = '<span style="color:#ef4444;">● Gemini Key Check Failed</span>';
@@ -267,7 +268,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       return false;
     }
   }
-
   function loadKeyForProvider() {
     inputApiKey.placeholder = 'AIzaSy...';
     inputApiKey.value = '';
