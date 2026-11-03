@@ -92,17 +92,31 @@ function normalizeAndExtractAnswers(result, rawInputText = '') {
   return result;
 }
 
-async function getGeminiApiKey() {
-  return new Promise((resolve) => {
-    chrome.storage.sync.get(['geminiApiKey'], (result) => {
-      resolve(result.geminiApiKey || '');
-    });
-  });
+const MODEL_CATALOG = [
+  { id: 'gemini-3.1-flash-lite', provider: 'gemini', name: 'Gemini 3.1 Flash-Lite' },
+  { id: 'gemini-2.5-flash-lite', provider: 'gemini', name: 'Gemini 2.5 Flash-Lite' },
+  { id: 'openai/gpt-oss-120b', provider: 'groq', name: 'GPT-OSS 120B' },
+  { id: 'qwen/qwen3.8-27b', provider: 'groq', name: 'Qwen 3.8 27B' },
+  { id: 'openai/gpt-oss-20b', provider: 'groq', name: 'GPT-OSS 20B' },
+  { id: 'google/gemma-4-26b-a4b-it:free', provider: 'openrouter', name: 'Gemma 4 26B A4B' },
+  { id: 'nvidia/nemotron-3.5-lightning:free', provider: 'openrouter', name: 'Nemotron 3.5 Lightning' },
+  { id: 'cohere/north-mini-code:free', provider: 'openrouter', name: 'North Mini Code' },
+  { id: 'ministral-8b-latest', provider: 'mistral', name: 'Ministral 8B' }
+];
+
+async function getProviderSettings() {
+  const saved = await chrome.storage.sync.get(['geminiApiKey', 'providerKeys', 'modelPriority', 'disabledModels']);
+  const keys = { ...(saved.providerKeys || {}), gemini: saved.providerKeys?.gemini || saved.geminiApiKey || '' };
+  const order = Array.isArray(saved.modelPriority) ? saved.modelPriority : [];
+  const disabled = new Set(Array.isArray(saved.disabledModels) ? saved.disabledModels : []);
+  const models = [...order, ...MODEL_CATALOG.map(m => m.id)].filter((id, index, all) => all.indexOf(id) === index)
+    .map(id => MODEL_CATALOG.find(m => m.id === id)).filter(Boolean).filter(m => !disabled.has(m.id) && keys[m.provider]);
+  return { keys, models };
 }
 
 async function getSelectedProviderConfig() {
-  const apiKey = await getGeminiApiKey();
-  return { provider: 'gemini', apiKey, model: 'gemini-3.1-flash-lite' };
+  const { keys, models } = await getProviderSettings();
+  return { provider: models[0]?.provider || 'gemini', apiKey: keys[models[0]?.provider] || '', model: models[0]?.id || 'gemini-3.1-flash-lite' };
 }
 
 
@@ -132,52 +146,73 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 // Text Mode Q&A Handler — direct provider requests; no hosted backend.
 async function handleTextSolve(req) {
   const text = String(req.text || '');
-  const apiKey = String(req.apiKey || '').trim();
-  const selectedModel = 'gemini-3.1-flash-lite';
   if (!text.trim()) throw new Error('Enter or capture page text before solving.');
-  if (!apiKey) throw new Error('A Gemini API key is required. Add it in Settings.');
   if (text.length > 500000) throw new Error('Page text exceeds the 500,000-character limit.');
-  logEvent('ACTION', '[TEXT MODE] Sending page text directly to Gemini 3.1 Flash-Lite...');
-  logEvent('INFO', '[DIAGNOSTIC] Fixed free-tier model. Input characters: ' + text.length);
+  const { keys, models } = await getProviderSettings();
+  if (!models.length) throw new Error('No enabled model has an API key. Add keys and enable models in Full Settings.');
   const userPrompt = await getCustomPrompt();
-  const promptContent = `User Question / Content:
-${text}
+  const promptContent = `User Question / Content:\n${text}\n\n${userPrompt ? `User Custom Instructions:\n${userPrompt}\n\n` : ''}Answer every supplied question in order. Follow the user's requested output format.`;
+  const failures = [];
 
-${userPrompt ? `User Custom Instructions:
-${userPrompt}
+  for (const model of models) {
+    const key = keys[model.provider];
+    try {
+      logEvent('ACTION', '[TEXT MODE] Trying ' + model.name + ' (' + model.id + ')');
+      let response, data = {};
+      if (model.provider === 'gemini') {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model.id}:generateContent?key=${encodeURIComponent(key)}`;
+        response = await fetch(url, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(90000),
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: AUTOSOLVE_SYSTEM_PROMPT }] },
+            contents: [{ role: 'user', parts: [{ text: promptContent }] }],
+            generationConfig: { temperature: 0.1, maxOutputTokens: 4096 }
+          })
+        });
+        const body = await response.text(); try { data = body ? JSON.parse(body) : {}; } catch {}
+        if (!response.ok) throw new Error('HTTP ' + response.status + ': ' + (data.error?.message || body.slice(0, 300)));
+        var rawOutput = data.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('').trim() || '';
+        if (!rawOutput) throw new Error('No response text: ' + (data.promptFeedback?.blockReason || data.candidates?.[0]?.finishReason || 'empty response'));
+      } else {
+        const base = model.provider === 'groq' ? 'https://api.groq.com/openai/v1' :
+          model.provider === 'openrouter' ? 'https://openrouter.ai/api/v1' : 'https://api.mistral.ai/v1';
+        response = await fetch(base + '/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key,
+            ...(model.provider === 'openrouter' ? { 'HTTP-Referer': 'https://github.com/Internetanyahu/autosolve_ai', 'X-Title': 'AutoSolve AI' } : {}) },
+          signal: AbortSignal.timeout(90000),
+          body: JSON.stringify({
+            model: model.id,
+            messages: [{ role: 'system', content: AUTOSOLVE_SYSTEM_PROMPT }, { role: 'user', content: promptContent }],
+            temperature: 0.1, max_tokens: 4096
+          })
+        });
+        const body = await response.text(); try { data = body ? JSON.parse(body) : {}; } catch {}
+        if (!response.ok) throw new Error('HTTP ' + response.status + ': ' + (data.error?.message || body.slice(0, 300)));
+        rawOutput = data.choices?.[0]?.message?.content || '';
+        if (Array.isArray(rawOutput)) rawOutput = rawOutput.map(part => part.text || '').join('');
+        rawOutput = String(rawOutput).trim();
+        if (!rawOutput) throw new Error('Provider returned an empty response.');
+      }
 
-` : ''}Answer every supplied question in order. Follow the user's requested output format.`;
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${encodeURIComponent(apiKey)}`;
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    signal: AbortSignal.timeout(185000),
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: AUTOSOLVE_SYSTEM_PROMPT }] },
-      contents: [{ role: 'user', parts: [{ text: promptContent }] }],
-      generationConfig: { temperature: 0.1, maxOutputTokens: 4096 },
-    }),
-  });
-  const body = await response.text();
-  let data = {};
-  try { data = body ? JSON.parse(body) : {}; } catch {}
-  if (!response.ok) throw new Error(`Gemini API HTTP ${response.status} (${selectedModel}): ${data.error?.message || body.slice(0, 700) || 'Request failed'}`);
-  const rawOutput = data.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('').trim() || '';
-  if (!rawOutput) {
-    const reason = data.promptFeedback?.blockReason || data.candidates?.[0]?.finishReason || 'No response text';
-    throw new Error('Gemini returned no answer text: ' + reason);
+      let parsed = parseGeminiJson(rawOutput);
+      if (parsed.parseWarning) parsed = { rawText: rawOutput, answers: [], allChoices: [], dropdowns: [] };
+      const result = normalizeAndExtractAnswers(parsed, text);
+      if (!result.answers.length && !result.rawText) result.rawText = rawOutput;
+      result.provider = model.provider;
+      result.model = model.id;
+      logEvent('COMPLETE', '[TEXT MODE] Solved with ' + model.name);
+      if (result.answers.length) result.answers.forEach(answer => logEvent('ANSWER', '[TEXT MODE] Question [' + answer.number + ']: ' + answer.text));
+      else logEvent('INFO', '[TEXT MODE] Provider response preserved as text.');
+      if (result.conciseReasoning) logEvent('REASONING', result.conciseReasoning);
+      return { success: true, result };
+    } catch (error) {
+      const message = model.name + ' failed: ' + (error?.message || String(error));
+      failures.push(message);
+      logEvent('ERROR', message + ' — trying next enabled model.');
+    }
   }
-  let parsed = parseGeminiJson(rawOutput);
-  if (parsed.parseWarning) parsed = { rawText: rawOutput, answers: [], allChoices: [], dropdowns: [] };
-  const result = normalizeAndExtractAnswers(parsed, text);
-  if (!result.answers.length && !result.rawText) result.rawText = rawOutput;
-  result.provider = 'gemini';
-  result.model = selectedModel;
-  logEvent('COMPLETE', '[TEXT MODE] Solved with GEMINI (' + selectedModel + ')');
-  if (result.answers.length) result.answers.forEach(answer => logEvent('ANSWER', '[TEXT MODE] Question [' + answer.number + ']: ' + answer.text));
-  else logEvent('INFO', '[TEXT MODE] Provider response preserved as text; no structured answer array was detected.');
-  if (result.conciseReasoning) logEvent('REASONING', result.conciseReasoning);
-  return { success: true, result };
+  throw new Error('All enabled models failed. ' + failures.join(' | '));
 }
 
 async function handleAutoCopyAndSolve() {
