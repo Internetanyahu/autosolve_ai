@@ -1,13 +1,28 @@
 # AutoSolve AI
 
-Text-first Chrome extension that extracts visible webpage text, sends the full question set to the configured AI provider, and returns numbered answers in page order. Page progression remains manual.
+Text-first Chrome extension that extracts visible webpage text and answers questions in page order. Page progression remains manual.
+
+## AI model and cost
+
+AutoSolve uses exactly one model: `gemini-3.1-flash-lite`.
+
+- Uses Google's Gemini Developer API.
+- Configured for the Gemini API free tier.
+- No OpenAI, Claude, DeepSeek, OpenRouter, custom-provider, or paid-model fallback.
+- No automatic model switching when quota is exhausted.
+- Output is capped at 4,096 tokens per request to limit unnecessary generation.
+- Free-tier rate limits and availability are controlled by Google and can change. If the free quota is exhausted, the request stops instead of switching to a paid model.
+
+Google model and pricing references:
+- https://ai.google.dev/gemini-api/docs/models/gemini-3.1-flash-lite
+- https://ai.google.dev/gemini-api/docs/pricing
 
 ## Initial setup
 
-1. On GitHub, open **Code → Download ZIP** and extract the repository.
-2. Open `chrome://extensions` and enable **Developer mode**.
-3. Select **Load unpacked** and choose the extracted AutoSolve AI folder.
-4. Open **Full Settings**, select an AI provider, enter its API key, and save.
+1. Open **Full Settings** from the extension.
+2. Create or use a Gemini API key from Google AI Studio.
+3. Paste the key into **Google Gemini API Key** and save.
+4. Use **Test Gemini Key** to verify access to the fixed model.
 
 ## Updating
 
@@ -23,8 +38,7 @@ Keep the original folder in the same location. If Chrome revokes folder permissi
 ## Solving
 
 - Paste question text or use **Auto-Copy Page & Solve**.
-- AutoSolve processes the entire supplied text and returns answers in page order.
+- AutoSolve processes the supplied text and returns answers in page order.
 - It does not click answer choices or automatically advance the page.
-- The editable instructions in Full Settings are added to the built-in solving instructions; they do not replace the core JSON/output requirements.
-
-API keys and preferences are stored in the browser's extension storage and are not included in repository files.
+- Optional custom instructions are added to the built-in solving instructions.
+- API keys and preferences are stored in browser extension storage and are not included in repository files.
