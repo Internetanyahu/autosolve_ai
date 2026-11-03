@@ -247,6 +247,29 @@ async function handleTextSolve(req) {
   throw new Error('All enabled models failed. ' + failures.join(' | '));
 }
 
+// Ensure the shortcut can communicate with the active page even if the
+// content script did not load automatically (for example, after navigation).
+async function ensureContentScriptInjected(tabId) {
+  const ping = () => new Promise(resolve => {
+    chrome.tabs.sendMessage(tabId, { action: 'PING' }, response => {
+      const unavailable = chrome.runtime.lastError;
+      resolve(!unavailable && response?.status === 'alive');
+    });
+  });
+
+  if (await ping()) return true;
+
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ['content.js']
+  });
+
+  if (!(await ping())) {
+    throw new Error('Content script injection completed, but the page did not respond.');
+  }
+  return true;
+}
+
 async function handleAutoCopyAndSolve() {
   try {
     const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
