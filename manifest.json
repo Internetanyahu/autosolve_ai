@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "AutoSolve AI - Text Q&A",
-  "version": "1.0.12",
-  "description": "Extracts visible page text, solves questions with your selected AI provider, and provides manual page progression.",
+  "version": "1.0.13",
+  "description": "Extracts visible page text and solves questions with your selected AI provider.",
   "permissions": [
     "activeTab",
     "scripting",
@@ -52,13 +52,6 @@
         "mac": "Alt+Shift+C"
       },
       "description": "Auto-copy page text, paste, and solve with big green answer"
-    },
-    "manual_next": {
-      "suggested_key": {
-        "default": "Alt+Shift+N",
-        "mac": "Alt+Shift+N"
-      },
-      "description": "Manually advance to the next activity"
     },
     "toggle_sidebar": {
       "suggested_key": {
