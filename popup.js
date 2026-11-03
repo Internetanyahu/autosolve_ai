@@ -30,7 +30,33 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Common controls
   const consoleBox = document.getElementById('console-box');
   const btnClear = document.getElementById('btn-clear');
+  const btnResetSession = document.getElementById('btn-reset-session');
   const btnOptions = document.getElementById('btn-options');
+  let sessionGeneration = 0;
+
+  if (btnResetSession) {
+    btnResetSession.addEventListener('click', () => {
+      if (!confirm('Reset this AutoSolve session? This clears saved page text, the previous answer, and console history. API keys and settings will remain.')) return;
+      sessionGeneration++;
+      textQuestionInput.value = '';
+      consoleBox.innerHTML = '<div class="log-item" style="color:#64748b;">Session reset. Ready for a new page or question.</div>';
+      btnSolveText.disabled = false;
+      btnSolveText.textContent = 'Solve & Number Answers';
+      const autoButton = document.getElementById('btn-auto-copy-solve');
+      if (autoButton) {
+        autoButton.disabled = false;
+        autoButton.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><span>⚡ Auto-Copy Page & Solve</span>';
+      }
+      chrome.runtime.sendMessage({ action: 'RESET_SESSION' }, response => {
+        const error = chrome.runtime.lastError;
+        if (error || !response?.success) {
+          appendLog('ERROR', 'Session reset failed: ' + (error?.message || response?.error || 'Unknown error.'));
+          return;
+        }
+        consoleBox.innerHTML = '<div class="log-item" style="color:#34d399;">Session reset. Saved page text, previous answer, and console history cleared. Settings preserved.</div>';
+      });
+    });
+  }
 
   // Attach Settings immediately so unrelated popup initialization cannot disable it.
   if (btnOptions) {
@@ -611,6 +637,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   btnSolveText.onclick = async () => {
+    const requestGeneration = sessionGeneration;
     const text = removeAccessibilityCredits(textQuestionInput.value);
     textQuestionInput.value = text;
     const provider = 'gemini';
@@ -650,6 +677,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           (res) => {
             if (responseHandled) return;
             responseHandled = true;
+            if (requestGeneration !== sessionGeneration) return;
             clearTimeout(solveTimeoutId);
 
             const runtimeError = chrome.runtime.lastError;
