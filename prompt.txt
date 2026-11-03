@@ -14,6 +14,10 @@ Core requirements:
 - For dropdowns, use only options actually visible or supplied.
 - Do not invent facts, answer choices, citations, or missing context.
 - Keep reasoning concise but sufficient to make the result understandable.
+- Put each question's brief explanation in the analysis field; the interface displays this in small secondary text.
+- Put the direct answer in the text field without adding a leading option number or repeating the question number.
+- For numbered answer choices, put the selected option numbers in a separate "choiceNumbers" array. For multiple selections, sort these numbers in ascending numeric order (for example, [1, 3, 4]).
+- Keep the answer text and any selected option numbers at the bottom of each question's result, after its explanation. Do not sort or reorder the questions themselves; preserve page order.
 - Before returning JSON, compare the answer list against the full page and verify that every detected question appears exactly once and remains in page order.
 
 Return valid JSON with this structure:
@@ -27,6 +31,7 @@ Return valid JSON with this structure:
       "question": "Exact or faithful wording of the first question",
       "letter": "A",
       "text": "Answer to the first question",
+      "choiceNumbers": [1],
       "isCorrect": true,
       "confidence": 0.0
     }
