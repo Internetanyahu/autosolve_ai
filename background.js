@@ -319,9 +319,10 @@ async function activateAutoCopySolveButton() {
     return;
   }
 
+  // Chrome currently reports windowId: -1 for POPUP and SIDE_PANEL
+  // contexts, so filtering by the active window would hide valid open views.
   const contexts = await chrome.runtime.getContexts({
-    contextTypes: ['POPUP', 'SIDE_PANEL'],
-    windowIds: [tab.windowId]
+    contextTypes: ['POPUP', 'SIDE_PANEL']
   });
 
   const isSidebar = context => {
