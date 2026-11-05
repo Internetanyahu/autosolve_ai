@@ -304,57 +304,58 @@ async function resetSession() {
   await chrome.storage.local.remove([
     'savedPastedText',
     'lastAutoSolveResult',
-    'recentConsoleLogs',
-    'pendingAutoCopySolveClick'
+    'recentConsoleLogs'
   ]);
 }
 
-// Persist side-panel visibility because the MV3 service worker can be suspended
-// while the side panel remains open.
-const sidePanelWindowsStorageKey = 'autosolveSidePanelWindows';
-
-if (chrome.sidePanel?.onOpened) {
-  chrome.sidePanel.onOpened.addListener(async info => {
-    if (info.path !== 'popup.html?view=sidebar' && info.path !== 'popup.html') return;
-    const stored = await chrome.storage.local.get([sidePanelWindowsStorageKey]);
-    const openWindows = stored[sidePanelWindowsStorageKey] || {};
-    openWindows[String(info.windowId)] = true;
-    await chrome.storage.local.set({ [sidePanelWindowsStorageKey]: openWindows });
-  });
-}
-
-if (chrome.sidePanel?.onClosed) {
-  chrome.sidePanel.onClosed.addListener(async info => {
-    if (info.path !== 'popup.html?view=sidebar' && info.path !== 'popup.html') return;
-    const stored = await chrome.storage.local.get([sidePanelWindowsStorageKey]);
-    const openWindows = stored[sidePanelWindowsStorageKey] || {};
-    delete openWindows[String(info.windowId)];
-    await chrome.storage.local.set({ [sidePanelWindowsStorageKey]: openWindows });
-  });
-}
-
+// Alt+Shift+C is passive: it only activates an AutoSolve UI that is
+// already open in the current browser window. It never opens the popup/panel.
 async function activateAutoCopySolveButton() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  const windowId = tab?.windowId;
-  if (windowId == null) {
-    logEvent('ERROR', 'Could not find the active browser window.');
+  if (tab?.windowId == null) return;
+
+  if (typeof chrome.runtime.getContexts !== 'function') {
+    logEvent('WARN', 'Shortcut ignored: this Chrome version cannot detect open extension views.');
     return;
   }
 
-  const stored = await chrome.storage.local.get([sidePanelWindowsStorageKey]);
-  const openWindows = stored[sidePanelWindowsStorageKey] || {};
-  if (openWindows[String(windowId)] === true) {
-    // The side panel is already open: activate its copy/solve button in place.
-    chrome.runtime.sendMessage({ action: 'ACTIVATE_AUTO_COPY_SOLVE_BUTTON' }).catch(() => {});
+  const contexts = await chrome.runtime.getContexts({
+    contextTypes: ['POPUP', 'SIDE_PANEL'],
+    windowIds: [tab.windowId]
+  });
+
+  const isSidebar = context => {
+    try {
+      return context.contextType === 'SIDE_PANEL' &&
+        new URL(context.documentUrl).searchParams.get('view') === 'sidebar';
+    } catch { return false; }
+  };
+  const isPopup = context => {
+    try {
+      const url = new URL(context.documentUrl);
+      return context.contextType === 'POPUP' &&
+        url.pathname.endsWith('/popup.html') &&
+        url.searchParams.get('view') !== 'sidebar';
+    } catch { return false; }
+  };
+
+  // Prefer the sidebar if both extension views happen to be open.
+  const targetView = contexts.some(isSidebar) ? 'sidebar' :
+    contexts.some(isPopup) ? 'popup' : null;
+
+  if (!targetView) {
+    logEvent('INFO', 'Shortcut ignored: open the AutoSolve popup or sidebar first.');
     return;
   }
 
-  // Only open the popup when this window does not already have the side panel.
-  await chrome.storage.local.set({ pendingAutoCopySolveClick: Date.now() });
   try {
-    await chrome.action.openPopup();
+    await chrome.runtime.sendMessage({
+      action: 'ACTIVATE_AUTO_COPY_SOLVE_BUTTON',
+      targetView
+    });
   } catch (error) {
-    logEvent('ERROR', 'Could not open AutoSolve AI popup: ' + (error?.message || String(error)));
+    logEvent('WARN', 'Shortcut could not reach the already-open AutoSolve view: ' +
+      (error?.message || String(error)));
   }
 }
 
