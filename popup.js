@@ -636,6 +636,25 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
   }
 
+  // Alt+Shift+C activates this exact button; it does not run a second solve path.
+  let shortcutButtonActivationHandled = false;
+  async function activatePendingShortcutButton(value) {
+    if (!value || shortcutButtonActivationHandled || Date.now() - Number(value) > 10000) return;
+    shortcutButtonActivationHandled = true;
+    await chrome.storage.local.remove(['pendingAutoCopySolveClick']);
+    btnAutoCopySolve.click();
+  }
+
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName === 'local' && changes.pendingAutoCopySolveClick?.newValue) {
+      activatePendingShortcutButton(changes.pendingAutoCopySolveClick.newValue);
+    }
+  });
+
+  chrome.storage.local.get(['pendingAutoCopySolveClick'], (stored) => {
+    activatePendingShortcutButton(stored.pendingAutoCopySolveClick);
+  });
+
   btnSolveText.onclick = async () => {
     const requestGeneration = sessionGeneration;
     const text = removeAccessibilityCredits(textQuestionInput.value);
