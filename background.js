@@ -309,14 +309,52 @@ async function resetSession() {
   ]);
 }
 
+// Persist side-panel visibility because the MV3 service worker can be suspended
+// while the side panel remains open.
+const sidePanelWindowsStorageKey = 'autosolveSidePanelWindows';
+
+if (chrome.sidePanel?.onOpened) {
+  chrome.sidePanel.onOpened.addListener(async info => {
+    if (info.path !== 'popup.html?view=sidebar' && info.path !== 'popup.html') return;
+    const stored = await chrome.storage.local.get([sidePanelWindowsStorageKey]);
+    const openWindows = stored[sidePanelWindowsStorageKey] || {};
+    openWindows[String(info.windowId)] = true;
+    await chrome.storage.local.set({ [sidePanelWindowsStorageKey]: openWindows });
+  });
+}
+
+if (chrome.sidePanel?.onClosed) {
+  chrome.sidePanel.onClosed.addListener(async info => {
+    if (info.path !== 'popup.html?view=sidebar' && info.path !== 'popup.html') return;
+    const stored = await chrome.storage.local.get([sidePanelWindowsStorageKey]);
+    const openWindows = stored[sidePanelWindowsStorageKey] || {};
+    delete openWindows[String(info.windowId)];
+    await chrome.storage.local.set({ [sidePanelWindowsStorageKey]: openWindows });
+  });
+}
+
 async function activateAutoCopySolveButton() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const windowId = tab?.windowId;
+  if (windowId == null) {
+    logEvent('ERROR', 'Could not find the active browser window.');
+    return;
+  }
+
+  const stored = await chrome.storage.local.get([sidePanelWindowsStorageKey]);
+  const openWindows = stored[sidePanelWindowsStorageKey] || {};
+  if (openWindows[String(windowId)] === true) {
+    // The side panel is already open: activate its copy/solve button in place.
+    chrome.runtime.sendMessage({ action: 'ACTIVATE_AUTO_COPY_SOLVE_BUTTON' }).catch(() => {});
+    return;
+  }
+
+  // Only open the popup when this window does not already have the side panel.
   await chrome.storage.local.set({ pendingAutoCopySolveClick: Date.now() });
   try {
-    // Opening the popup runs the same UI code used by a normal button click.
-    // If it is already open, its storage listener activates the button.
     await chrome.action.openPopup();
   } catch (error) {
-    logEvent('ERROR', 'Could not open AutoSolve AI to activate Auto-Copy Page & Solve: ' + (error?.message || String(error)));
+    logEvent('ERROR', 'Could not open AutoSolve AI popup: ' + (error?.message || String(error)));
   }
 }
 
