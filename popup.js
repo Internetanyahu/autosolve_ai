@@ -761,7 +761,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     chrome.storage.local.remove(['recentConsoleLogs']);
   };
 
+  const isSidebarView = new URLSearchParams(window.location.search).get('view') === 'sidebar';
+
   chrome.runtime.onMessage.addListener((req) => {
+    if (req.action === 'ACTIVATE_AUTO_COPY_SOLVE_BUTTON' && isSidebarView) {
+      btnAutoCopySolve.click();
+      return;
+    }
     if (req.action === 'NEW_LOG' && req.log) {
       appendLog(req.log.level, req.log.message, false);
     }
