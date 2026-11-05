@@ -296,36 +296,7 @@ async function handleTextSolve(req) {
   throw new Error('All enabled models failed. ' + failures.join(' | '));
 }
 
-// Ensure the shortcut can communicate with the active page even if the
-// content script did not load automatically (for example, after navigation).
-async function ensureContentScriptInjected(tabId) {
-  const ping = () => new Promise(resolve => {
-    chrome.tabs.sendMessage(tabId, { action: 'PING' }, response => {
-      const unavailable = chrome.runtime.lastError;
-      resolve(!unavailable && response?.status === 'alive');
-    });
-  });
-
-  if (await ping()) return true;
-
-  await chrome.scripting.executeScript({
-    target: { tabId },
-    files: ['content.js']
-  });
-
-  if (!(await ping())) {
-    throw new Error('Content script injection completed, but the page did not respond.');
-  }
-  return true;
-}
-
-let activeAutoCopySolve = null;
-
 async function resetSession() {
-  if (activeAutoCopySolve) {
-    activeAutoCopySolve.controller.abort(new DOMException('Session reset by user.', 'AbortError'));
-    activeAutoCopySolve = null;
-  }
   for (const controller of activeTextSolves) {
     controller.abort(new DOMException('Session reset by user.', 'AbortError'));
   }
@@ -333,104 +304,20 @@ async function resetSession() {
   await chrome.storage.local.remove([
     'savedPastedText',
     'lastAutoSolveResult',
-    'recentConsoleLogs'
+    'recentConsoleLogs',
+    'pendingAutoCopySolveClick'
   ]);
 }
 
-function handleAutoCopyAndSolve() {
-  // A second shortcut cancels the old run and immediately takes ownership.
-  if (activeAutoCopySolve) {
-    logEvent('WARN', 'Cancelling the previous solve because a new keyboard shortcut was pressed.');
-    activeAutoCopySolve.controller.abort(new DOMException('Cancelled by a newer keyboard shortcut.', 'AbortError'));
+async function activateAutoCopySolveButton() {
+  await chrome.storage.local.set({ pendingAutoCopySolveClick: Date.now() });
+  try {
+    // Opening the popup runs the same UI code used by a normal button click.
+    // If it is already open, its storage listener activates the button.
+    await chrome.action.openPopup();
+  } catch (error) {
+    logEvent('ERROR', 'Could not open AutoSolve AI to activate Auto-Copy Page & Solve: ' + (error?.message || String(error)));
   }
-
-  const operation = { controller: new AbortController(), id: Symbol('auto-solve') };
-  activeAutoCopySolve = operation;
-  const signal = operation.controller.signal;
-
-  const run = (async () => {
-    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    throwIfSolveAborted(signal);
-    if (!activeTab?.id) throw new Error('No active tab found for auto-copy.');
-
-    await ensureContentScriptInjected(activeTab.id);
-    throwIfSolveAborted(signal);
-
-    // Only the first frame reply is accepted. A late reply from a cancelled
-    // operation cannot launch a solve or replace the newer operation's result.
-    const pageText = await new Promise((resolve, reject) => {
-      let settled = false;
-      const finish = (fn, value) => {
-        if (settled) return;
-        settled = true;
-        signal.removeEventListener('abort', onAbort);
-        fn(value);
-      };
-      const onAbort = () => finish(reject, signal.reason || new DOMException('Solve cancelled.', 'AbortError'));
-      signal.addEventListener('abort', onAbort, { once: true });
-
-      chrome.tabs.sendMessage(activeTab.id, { action: 'GRAB_PAGE_CONTENT' }, async (res) => {
-        if (settled) return;
-        try {
-          let extracted = res?.text || '';
-          if (!extracted) {
-            try {
-              const results = await chrome.scripting.executeScript({
-                target: { tabId: activeTab.id, allFrames: false },
-                func: () => (window.__AUTOSOLVE_GRAB_CONTENT__ ? window.__AUTOSOLVE_GRAB_CONTENT__().text : document.body.innerText),
-              });
-              extracted = results[0]?.result || '';
-            } catch {}
-          }
-          finish(resolve, extracted);
-        } catch (error) {
-          finish(reject, error);
-        }
-      });
-    });
-
-    throwIfSolveAborted(signal);
-    const text = String(pageText || '');
-    if (!text.trim()) throw new Error('Could not detect question text on active page.');
-
-    logEvent('ACTION', `📋 Auto-copied question from page (${text.slice(0, 60)}...). Solving...`);
-    await chrome.storage.local.set({ savedPastedText: text });
-    throwIfSolveAborted(signal);
-
-    const solveResponse = await handleTextSolve({
-      text,
-      source: 'keyboard_shortcut',
-      signal,
-    });
-    throwIfSolveAborted(signal);
-    if (!solveResponse?.success || !solveResponse.result) {
-      throw new Error('The AI returned no displayable result.');
-    }
-
-    // A cancelled/older operation must never overwrite a newer answer.
-    if (activeAutoCopySolve !== operation) return;
-    const resultPayload = {
-      result: solveResponse.result,
-      text,
-      completedAt: new Date().toISOString(),
-    };
-    await chrome.storage.local.set({ lastAutoSolveResult: resultPayload });
-    if (activeAutoCopySolve !== operation || signal.aborted) return;
-    chrome.runtime.sendMessage({
-      action: 'AUTO_SOLVE_RESULT',
-      payload: resultPayload,
-    }).catch(() => {});
-  })().catch(error => {
-    if (signal.aborted) {
-      logEvent('INFO', 'Previous keyboard-shortcut solve cancelled.');
-    } else {
-      logEvent('ERROR', `Auto-copy failed: ${error?.message || String(error)}`);
-    }
-  }).finally(() => {
-    if (activeAutoCopySolve === operation) activeAutoCopySolve = null;
-  });
-
-  return run;
 }
 
 async function getCustomPrompt() {
@@ -458,7 +345,7 @@ async function openAutoSolveSidePanel() {
 
 chrome.commands.onCommand.addListener(command => {
   if (command === 'toggle_sidebar') openAutoSolveSidePanel();
-  if (command === 'auto_copy_solve') handleAutoCopyAndSolve();
+  if (command === 'auto_copy_solve') activateAutoCopySolveButton();
   if (command === 'manual_next') chrome.tabs.query({active:true,currentWindow:true}, async tabs => {
     const tabId=tabs[0]?.id;
     if(!tabId)return;
